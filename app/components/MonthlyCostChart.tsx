@@ -15,27 +15,35 @@ ChartJS.register(ArcElement, Tooltip, Legend);
 type Entry = {
   category: string | null;
   amount: number | null;
-  entry_date: string | null;
+  entry_date: string | null; // "YYYY-MM-DD"
 };
 
+type ViewMode = "all" | "year" | "month";
+
+// ✅ Parse YYYY-MM-DD as LOCAL time (prevents date shifting / missing entries)
+function parseLocalDate(iso: string) {
+  return new Date(`${iso}T00:00:00`);
+}
+
 export default function MonthlyCostChart({ entries }: { entries: Entry[] }) {
-  const [view, setView] = useState<"all" | "year" | "month">("all");
+  const [view, setView] = useState<ViewMode>("all");
 
   const filtered = useMemo(() => {
     const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth(); // 0-11
 
     return entries.filter((e) => {
       if (!e.entry_date) return false;
-      const d = new Date(e.entry_date);
+
+      const d = parseLocalDate(e.entry_date);
+      if (Number.isNaN(d.getTime())) return false;
 
       if (view === "month") {
-        return (
-          d.getMonth() === now.getMonth() &&
-          d.getFullYear() === now.getFullYear()
-        );
+        return d.getFullYear() === year && d.getMonth() === month;
       }
       if (view === "year") {
-        return d.getFullYear() === now.getFullYear();
+        return d.getFullYear() === year;
       }
       return true;
     });
@@ -127,7 +135,7 @@ export default function MonthlyCostChart({ entries }: { entries: Entry[] }) {
                 lineWidth: 0,
                 hidden: !chart.getDataVisibility(i),
                 index: i,
-                // ✅ keeps legend text readable (not black)
+                // ✅ keeps legend text readable
                 fontColor: "#e5e7eb",
               };
             });
@@ -157,7 +165,7 @@ export default function MonthlyCostChart({ entries }: { entries: Entry[] }) {
         </label>
         <select
           value={view}
-          onChange={(e) => setView(e.target.value as any)}
+          onChange={(e) => setView(e.target.value as ViewMode)}
           style={{
             background: "#020617",
             color: "white",

@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+
 type Aircraft = {
   id: string;
   user_id: string;
@@ -14,8 +16,14 @@ type Aircraft = {
 };
 
 export default function Home() {
+  const router = useRouter();
+
   const [userId, setUserId] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+
+  // ✅ Admin gate for showing the button
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminLoading, setAdminLoading] = useState(true);
 
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,6 +72,45 @@ export default function Home() {
     };
   }, []);
 
+  // ✅ Admin check (runs whenever userId changes)
+  useEffect(() => {
+    let mounted = true;
+
+    async function checkAdmin() {
+      setAdminLoading(true);
+
+      if (!userId) {
+        setIsAdmin(false);
+        setAdminLoading(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("app_admins")
+        .select("user_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (!mounted) return;
+
+      if (error) {
+        // Don’t hard-fail the whole dashboard if admin check errors
+        console.error("Admin check error:", error.message);
+        setIsAdmin(false);
+      } else {
+        setIsAdmin(!!data);
+      }
+
+      setAdminLoading(false);
+    }
+
+    checkAdmin();
+
+    return () => {
+      mounted = false;
+    };
+  }, [userId]);
+
   async function loadAircraft() {
     setLoading(true);
     setError(null);
@@ -74,10 +121,11 @@ export default function Home() {
       return;
     }
 
-    const { data, error } = await supabase
-      .from("aircraft")
-      .select("*")
-      .order("created_at", { ascending: false });
+   const { data, error } = await supabase
+  .from("aircraft")
+  .select("*")
+  .eq("user_id", userId)
+  .order("created_at", { ascending: false });
 
     if (error) {
       setError(error.message);
@@ -159,14 +207,28 @@ export default function Home() {
         {authLoading ? (
           <div>Checking login…</div>
         ) : userId ? (
-          <div>
-            Logged in ✅{" "}
-            <button
-              onClick={handleLogout}
-              style={{ marginLeft: 10, padding: "6px 10px" }}
-            >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span>Logged in ✅</span>
+
+            <button onClick={handleLogout} style={{ padding: "6px 10px" }}>
               Logout
             </button>
+
+            {/* ✅ Admin-only button */}
+            {!adminLoading && isAdmin && (
+              <button
+                onClick={() => router.push("/admin/benchmarks")}
+                style={{
+                  padding: "6px 10px",
+                  border: "1px solid #444",
+                  borderRadius: 10,
+                  background: "transparent",
+                  cursor: "pointer",
+                }}
+              >
+                Admin · Benchmarks
+              </button>
+            )}
           </div>
         ) : (
           <PasswordLoginBox onError={setError} />
@@ -324,9 +386,6 @@ function PasswordLoginBox({ onError }: { onError: (msg: string | null) => void }
       } else {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-
-        // Some Supabase projects require email confirmation.
-        // If so, user must confirm email before login works.
         alert("Account created ✅ If you’re asked to confirm email, check your inbox.");
       }
     } catch (e: any) {
@@ -358,11 +417,7 @@ function PasswordLoginBox({ onError }: { onError: (msg: string | null) => void }
       />
 
       <div style={{ display: "flex", gap: 10 }}>
-        <button
-          onClick={handleSubmit}
-          disabled={busy}
-          style={{ padding: "10px 14px" }}
-        >
+        <button onClick={handleSubmit} disabled={busy} style={{ padding: "10px 14px" }}>
           {busy ? "Working…" : mode === "login" ? "Login" : "Sign Up"}
         </button>
 

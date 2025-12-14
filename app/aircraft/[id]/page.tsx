@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import MonthlyCostChart from "@/app/components/MonthlyCostChart";
-import CostPerHourTrendChart from "@/app/components/CostPerHourTrendChart";
+import MonthlyCostChart from "../../components/MonthlyCostChart";
+import CostPerHourTrendChart from "../../components/CostPerHourTrendChart";
 
 type AircraftRow = {
   id: string;
@@ -21,7 +21,7 @@ type MxEntryRow = {
   id: string;
   user_id: string;
   aircraft_id: string;
-  entry_date: string | null;
+  entry_date: string | null; // YYYY-MM-DD
   category: string | null;
   amount: number | null;
   tach_hours: number | null;
@@ -29,8 +29,17 @@ type MxEntryRow = {
   created_at: string;
 };
 
+type BenchmarkRow = {
+  id: string;
+  aircraft_type: string;
+  hourly_cost: number;
+  annual_cost: number | null;
+  effective_date: string; // YYYY-MM-DD
+};
+
 export default function AircraftMaintenancePage() {
   const params = useParams();
+  const router = useRouter();
 
   const aircraftId = useMemo(() => {
     const raw = (params as any)?.id;
@@ -48,6 +57,9 @@ export default function AircraftMaintenancePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>("");
 
+  // ✅ Benchmark
+  const [benchmark, setBenchmark] = useState<BenchmarkRow | null>(null);
+
   // ---- Form
   const [entryDate, setEntryDate] = useState("");
   const [category, setCategory] = useState("Maintenance");
@@ -55,7 +67,9 @@ export default function AircraftMaintenancePage() {
   const [tachHours, setTachHours] = useState("");
   const [notes, setNotes] = useState("");
 
-  // If Supabase has a category constraint, these MUST match exactly
+  // ✅ Toggle panel for Add Entry
+  const [showAddEntry, setShowAddEntry] = useState(false);
+
   const ALLOWED_CATEGORIES = [
     "Maintenance",
     "Oil Change",
@@ -112,7 +126,12 @@ export default function AircraftMaintenancePage() {
     fontWeight: 600,
   };
 
-  // ---- Auth bootstrap (and live changes)
+  const ghostButton: CSSProperties = {
+    ...buttonStyle,
+    background: "transparent",
+  };
+
+  // ---- Auth bootstrap
   useEffect(() => {
     let mounted = true;
 
@@ -146,7 +165,7 @@ export default function AircraftMaintenancePage() {
     };
   }, []);
 
-  // ---- Load aircraft + entries
+  // ---- Load aircraft + entries + benchmark
   async function loadAll() {
     if (!aircraftId) return;
 
@@ -174,6 +193,18 @@ export default function AircraftMaintenancePage() {
 
       if (entryErr) throw entryErr;
       setEntries(entryData ?? []);
+
+      // ✅ Load benchmark (latest row, forgiving aircraft_type values)
+      const { data: benchData, error: benchErr } = await supabase
+        .from("maintenance_benchmarks")
+        .select("id, aircraft_type, hourly_cost, annual_cost, effective_date")
+        .in("aircraft_type", ["C172", "172", "C172N", "172N"])
+        .order("effective_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (benchErr) throw benchErr;
+      setBenchmark(benchData ?? null);
     } catch (e: any) {
       setError(e?.message ?? "Unknown error");
     } finally {
@@ -186,26 +217,56 @@ export default function AircraftMaintenancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aircraftId]);
 
-  // ---- Calculations (tach-based)
-  const totalSpend = useMemo(() => {
-    return entries.reduce((sum, e) => sum + (e.amount ?? 0), 0);
-  }, [entries]);
+  // ---- Calculations (All-time)
+  const totalSpend = useMemo(
+    () => entries.reduce((sum, e) => sum + (e.amount ?? 0), 0),
+    [entries]
+  );
 
   const tachValues = useMemo(() => {
     return entries
       .map((e) => e.tach_hours)
-      .filter((v): v is number => typeof v === "number")
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
       .sort((a, b) => a - b);
   }, [entries]);
 
   const hoursFlown = useMemo(() => {
     if (tachValues.length < 2) return 0;
-    return tachValues[tachValues.length - 1] - tachValues[0];
+    const diff = tachValues[tachValues.length - 1] - tachValues[0];
+    return diff > 0 ? diff : 0;
   }, [tachValues]);
 
   const costPerHour = useMemo(() => {
     return hoursFlown > 0 ? totalSpend / hoursFlown : null;
   }, [hoursFlown, totalSpend]);
+
+  // ✅ benchmark comparison
+  const benchmarkCompare = useMemo(() => {
+    if (!benchmark) return null;
+    if (benchmark.hourly_cost <= 0) return null;
+    if (costPerHour == null) return null;
+
+    const diff = costPerHour - benchmark.hourly_cost;
+    const pct = (diff / benchmark.hourly_cost) * 100;
+
+    return {
+      diff,
+      pct,
+      above: diff > 0,
+      equalish: Math.abs(pct) < 0.5,
+    };
+  }, [benchmark, costPerHour]);
+
+  // ✅ R/Y/G status for benchmark (based on % off)
+  const benchmarkStatus = useMemo(() => {
+    if (!benchmarkCompare) return null;
+
+    const absPct = Math.abs(benchmarkCompare.pct);
+
+    if (absPct <= 10) return { label: "On track", color: "#22c55e" }; // green
+    if (absPct <= 25) return { label: "Watch", color: "#f59e0b" }; // yellow
+    return { label: "High", color: "#ef4444" }; // red
+  }, [benchmarkCompare]);
 
   async function addEntry(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -228,24 +289,30 @@ export default function AircraftMaintenancePage() {
       return setError("Tach Hours must be a number.");
     }
 
-    // Tach Safety (prevents backwards hours)
     const latestTach = entries
       .map((x) => x.tach_hours)
-      .filter((v): v is number => typeof v === "number")
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
       .sort((a, b) => b - a)[0];
 
-    if (typeof tachNum === "number" && typeof latestTach === "number" && tachNum < latestTach) {
+    if (
+      typeof tachNum === "number" &&
+      typeof latestTach === "number" &&
+      tachNum < latestTach
+    ) {
       setSaving(false);
-      return setError(`Tach hours cannot go backwards. Latest recorded tach is ${latestTach}.`);
+      return setError(
+        `Tach hours cannot go backwards. Latest recorded tach is ${latestTach}.`
+      );
     }
 
-    // If entering cost, require tach (optional rule — remove if you don’t want it)
     if (amountNum !== null && tachNum === null) {
       setSaving(false);
       return setError("Tach hours are required when entering a cost.");
     }
 
-    const safeCategory = ALLOWED_CATEGORIES.includes(category) ? category : "Maintenance";
+    const safeCategory = ALLOWED_CATEGORIES.includes(category)
+      ? category
+      : "Maintenance";
 
     const payload = {
       user_id: userId,
@@ -257,7 +324,9 @@ export default function AircraftMaintenancePage() {
       notes: notes.trim() === "" ? null : notes.trim(),
     };
 
-    const { error: insErr } = await supabase.from("maintenance_entries").insert(payload);
+    const { error: insErr } = await supabase
+      .from("maintenance_entries")
+      .insert(payload);
 
     if (insErr) {
       setSaving(false);
@@ -271,9 +340,42 @@ export default function AircraftMaintenancePage() {
     setAmount("");
     setTachHours("");
     setNotes("");
-
     setSaving(false);
+
+    setShowAddEntry(false);
   }
+
+  // ✅ Group entries by YEAR
+  const entriesByYear = useMemo(() => {
+    const withDates = entries.filter((e) => !!e.entry_date);
+
+    const withoutDates = entries
+      .filter((e) => !e.entry_date)
+      .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+
+    const sorted = [...withDates].sort((a, b) =>
+      (b.entry_date ?? "").localeCompare(a.entry_date ?? "")
+    );
+
+    const groups: { year: string; rows: MxEntryRow[] }[] = [];
+
+    for (const row of sorted) {
+      const year = (row.entry_date ?? "").slice(0, 4) || "Unknown";
+      const last = groups[groups.length - 1];
+
+      if (!last || last.year !== year) {
+        groups.push({ year, rows: [row] });
+      } else {
+        last.rows.push(row);
+      }
+    }
+
+    if (withoutDates.length > 0) {
+      groups.push({ year: "No Date", rows: withoutDates });
+    }
+
+    return groups;
+  }, [entries]);
 
   return (
     <div
@@ -284,10 +386,31 @@ export default function AircraftMaintenancePage() {
         minHeight: "100vh",
       }}
     >
-      <h1 style={{ marginBottom: 6 }}>Aircraft MX ✈️</h1>
+      {/* Top bar */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 10,
+        }}
+      >
+        <button style={ghostButton} onClick={() => router.push("/")}>
+          ← Back to Aircraft
+        </button>
+
+        <h1 style={{ margin: 0 }}>Aircraft MX ✈️</h1>
+
+        <div style={{ width: 160 }} />
+      </div>
 
       <div style={{ opacity: 0.9, marginBottom: 14 }}>
-        {authLoading ? "Checking login…" : userId ? "Logged in ✅" : "Not logged in ❌"}
+        {authLoading
+          ? "Checking login…"
+          : userId
+          ? "Logged in ✅"
+          : "Not logged in ❌"}
       </div>
 
       {!!error && (
@@ -312,7 +435,8 @@ export default function AircraftMaintenancePage() {
           <div>Loading…</div>
         ) : aircraft ? (
           <div style={{ fontSize: 18, fontWeight: 800 }}>
-            {aircraft.tail_number ?? "Untitled"} {aircraft.model ? `— ${aircraft.model}` : ""}
+            {aircraft.tail_number ?? "Untitled"}
+            {aircraft.model ? ` — ${aircraft.model}` : ""}
           </div>
         ) : (
           <div style={{ fontSize: 14, opacity: 0.9 }}>
@@ -322,152 +446,313 @@ export default function AircraftMaintenancePage() {
       </div>
 
       {/* Summary Cards */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 12,
+          marginBottom: 12,
+          flexWrap: "wrap",
+        }}
+      >
         <div style={{ ...cardDark, flex: 1, minWidth: 220 }}>
           <div style={smallMuted}>Total Spend</div>
-          <div style={{ fontSize: 22, fontWeight: 900 }}>${totalSpend.toFixed(2)}</div>
+          <div style={{ fontSize: 22, fontWeight: 900 }}>
+            ${totalSpend.toFixed(2)}
+          </div>
         </div>
 
         <div style={{ ...cardDark, flex: 1, minWidth: 220 }}>
           <div style={smallMuted}>Hours Logged</div>
-          <div style={{ fontSize: 22, fontWeight: 900 }}>{hoursFlown.toFixed(1)}</div>
+          <div style={{ fontSize: 22, fontWeight: 900 }}>
+            {hoursFlown.toFixed(1)}
+          </div>
         </div>
 
         <div style={{ ...cardDark, flex: 1, minWidth: 220 }}>
           <div style={smallMuted}>Cost / Hour</div>
           <div style={{ fontSize: 22, fontWeight: 900 }}>
-            {costPerHour ? `$${costPerHour.toFixed(2)}` : "—"}
+            {costPerHour != null ? `$${costPerHour.toFixed(2)}` : "—"}
           </div>
         </div>
       </div>
 
-      {/* ✅ CHART (this is the JSX you were missing) */}
+      {/* ✅ Benchmark Card (R/Y/G lives ONLY here) */}
+      <div style={{ ...cardDark, marginBottom: 18 }}>
+        <div style={smallMuted}>Industry Estimated Benchmark (C172)</div>
+
+        {!benchmark ? (
+          <div style={{ marginTop: 8, opacity: 0.85 }}>
+            No industry estimate found yet. Add one to{" "}
+<code>maintenance_benchmarks</code> for{" "}
+<b>aircraft_type = "C172"</b> (or 172 / 172N / C172N).
+          </div>
+        ) : (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 16, fontWeight: 800 }}>
+              Avg: ${benchmark.hourly_cost.toFixed(2)} / hr{" "}
+              {benchmark.annual_cost != null
+                ? ` • $${benchmark.annual_cost.toFixed(0)} / yr`
+                : ""}
+            </div>
+
+            <div
+              style={{
+                marginTop: 8,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              {benchmarkCompare ? (
+                <>
+                  {/* ✅ Status pill */}
+                  {benchmarkStatus && (
+                    <span
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 999,
+                        fontWeight: 900,
+                        fontSize: 12,
+                        border: `1px solid ${benchmarkStatus.color}66`,
+                        background: `${benchmarkStatus.color}35`,
+                        color: benchmarkStatus.color,
+                      }}
+                    >
+                      {benchmarkStatus.label}
+                    </span>
+                  )}
+
+                  <span style={{ opacity: 0.92 }}>
+                    {benchmarkCompare.equalish ? (
+                      <>You’re basically right on average ✅</>
+                    ) : benchmarkCompare.above ? (
+                      <>
+                        You’re <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b>{" "}
+above the industry estimate (≈ ${benchmarkCompare.diff.toFixed(2)} / hr) 📈
+                      </>
+                    ) : (
+                      <>
+                        You’re <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b>{" "}
+                        below the industry estimate (≈ $
+                        {Math.abs(benchmarkCompare.diff).toFixed(2)} / hr) 📉
+                      </>
+                    )}
+                  </span>
+                </>
+              ) : (
+                <span style={{ opacity: 0.85 }}>
+                  Add more entries with Amount + Tach (at least 2 different tach
+                  values) to compare.
+                </span>
+              )}
+            </div>
+
+            <div style={{ marginTop: 6, ...smallMuted }}>
+              Effective: {benchmark.effective_date}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Charts */}
       <div style={{ ...cardDark, marginBottom: 18 }}>
         <div style={smallMuted}>Monthly Spend</div>
         <div style={{ marginTop: 10 }}>
           <MonthlyCostChart entries={entries} />
         </div>
       </div>
+
       <div style={{ ...cardDark, marginBottom: 18 }}>
-  <div style={smallMuted}>Cost / Hour Trend</div>
-  <div style={{ marginTop: 10 }}>
-    <CostPerHourTrendChart entries={entries} />
-  </div>
-</div>
+        <div style={smallMuted}>Cost / Hour Trend</div>
+        <div style={{ marginTop: 10 }}>
+          <CostPerHourTrendChart entries={entries} />
+        </div>
+      </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
-        {/* Add Entry */}
-        <div style={cardLight}>
-          <h2 style={{ marginTop: 0, marginBottom: 12 }}>Add Maintenance Entry</h2>
+      {/* Entries table */}
+      <div style={cardLight}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+            marginBottom: 12,
+          }}
+        >
+          <h2 style={{ margin: 0 }}>Entries</h2>
 
-          <form onSubmit={addEntry}>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                gap: 10,
-              }}
-            >
-              <label style={{ display: "grid", gap: 6 }}>
-                <span style={smallMuted}>Date</span>
-                <input
-                  style={inputStyle}
-                  value={entryDate}
-                  onChange={(e) => setEntryDate(e.target.value)}
-                  placeholder="YYYY-MM-DD"
-                />
-              </label>
-
-              <label style={{ display: "grid", gap: 6 }}>
-                <span style={smallMuted}>Category</span>
-                <select style={inputStyle} value={category} onChange={(e) => setCategory(e.target.value)}>
-                  {ALLOWED_CATEGORIES.map((c) => (
-                    <option key={c} value={c} style={{ color: "black" }}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label style={{ display: "grid", gap: 6 }}>
-                <span style={smallMuted}>Amount ($)</span>
-                <input
-                  style={inputStyle}
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="e.g. 245.00"
-                />
-              </label>
-
-              <label style={{ display: "grid", gap: 6 }}>
-                <span style={smallMuted}>Tach Hours</span>
-                <input
-                  style={inputStyle}
-                  value={tachHours}
-                  onChange={(e) => setTachHours(e.target.value)}
-                  placeholder="e.g. 1834.6"
-                />
-              </label>
-
-              <label style={{ display: "grid", gap: 6, gridColumn: "1 / -1" }}>
-                <span style={smallMuted}>Notes</span>
-                <input
-                  style={inputStyle}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="What was done?"
-                />
-              </label>
-            </div>
-
-            <button type="submit" style={{ ...buttonStyle, marginTop: 12 }} disabled={saving}>
-              {saving ? "Saving…" : "+ Add Entry"}
-            </button>
-          </form>
+          <button
+            style={buttonStyle}
+            onClick={() => setShowAddEntry((v) => !v)}
+          >
+            {showAddEntry ? "Close" : "+ Add Entry"}
+          </button>
         </div>
 
-        {/* Entries */}
-        <div style={cardLight}>
-          <h2 style={{ marginTop: 0, marginBottom: 12 }}>Entries</h2>
+        {showAddEntry && (
+          <div style={{ ...cardDark, marginBottom: 14 }}>
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+              Add Maintenance Entry
+            </h3>
 
-          {loading ? (
-            <div>Loading…</div>
-          ) : entries.length === 0 ? (
-            <div style={{ opacity: 0.7 }}>No entries yet.</div>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-                <thead>
-                  <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.10)" }}>
-                    <th style={{ padding: "8px 10px" }}>Date</th>
-                    <th style={{ padding: "8px 10px" }}>Category</th>
-                    <th style={{ padding: "8px 10px" }}>Amount</th>
-                    <th style={{ padding: "8px 10px" }}>Tach</th>
-                    <th style={{ padding: "8px 10px" }}>Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((e) => (
-                    <tr key={e.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                      <td style={{ padding: "8px 10px" }}>{e.entry_date ?? "-"}</td>
-                      <td style={{ padding: "8px 10px" }}>{e.category ?? "-"}</td>
-                      <td style={{ padding: "8px 10px" }}>
-                        {typeof e.amount === "number" ? `$${e.amount.toFixed(2)}` : "-"}
-                      </td>
-                      <td style={{ padding: "8px 10px" }}>
-                        {typeof e.tach_hours === "number" ? e.tach_hours : "-"}
-                      </td>
-                      <td style={{ padding: "8px 10px" }}>{e.notes ?? "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+            <form onSubmit={addEntry}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                  gap: 10,
+                }}
+              >
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={smallMuted}>Date</span>
+                  <input
+                    style={inputStyle}
+                    value={entryDate}
+                    onChange={(e) => setEntryDate(e.target.value)}
+                    placeholder="YYYY-MM-DD"
+                  />
+                </label>
 
-          <div style={{ marginTop: 10, ...smallMuted }}>
-            Next: per-aircraft dashboard + monthly stacked chart + better filters.
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={smallMuted}>Category</span>
+                  <select
+                    style={inputStyle}
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                  >
+                    {ALLOWED_CATEGORIES.map((c) => (
+                      <option key={c} value={c} style={{ color: "black" }}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={smallMuted}>Amount ($)</span>
+                  <input
+                    style={inputStyle}
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="e.g. 245.00"
+                  />
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={smallMuted}>Tach Hours</span>
+                  <input
+                    style={inputStyle}
+                    value={tachHours}
+                    onChange={(e) => setTachHours(e.target.value)}
+                    placeholder="e.g. 1834.6"
+                  />
+                </label>
+
+                <label style={{ display: "grid", gap: 6, gridColumn: "1 / -1" }}>
+                  <span style={smallMuted}>Notes</span>
+                  <input
+                    style={inputStyle}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="What was done?"
+                  />
+                </label>
+              </div>
+
+              <button
+                type="submit"
+                style={{ ...buttonStyle, marginTop: 12 }}
+                disabled={saving}
+              >
+                {saving ? "Saving…" : "Save Entry"}
+              </button>
+            </form>
           </div>
+        )}
+
+        {loading ? (
+          <div>Loading…</div>
+        ) : entries.length === 0 ? (
+          <div style={{ opacity: 0.7 }}>No entries yet.</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}
+            >
+              <thead>
+                <tr
+                  style={{
+                    textAlign: "left",
+                    borderBottom: "1px solid rgba(255,255,255,0.10)",
+                  }}
+                >
+                  <th style={{ padding: "8px 10px" }}>Date</th>
+                  <th style={{ padding: "8px 10px" }}>Category</th>
+                  <th style={{ padding: "8px 10px" }}>Amount</th>
+                  <th style={{ padding: "8px 10px" }}>Tach</th>
+                  <th style={{ padding: "8px 10px" }}>Notes</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {entriesByYear.map((group, idx) => (
+                  <Fragment key={group.year}>
+                    {idx !== 0 && (
+                      <tr>
+                        <td colSpan={5} style={{ padding: 0, height: 12 }} />
+                      </tr>
+                    )}
+
+                    <tr>
+                      <td
+                        colSpan={5}
+                        style={{
+                          padding: "14px 10px 6px",
+                          fontWeight: 900,
+                          color: "#e5e7eb",
+                          letterSpacing: 0.5,
+                          borderBottom: "1px solid rgba(255,255,255,0.10)",
+                        }}
+                      >
+                        {group.year}
+                      </td>
+                    </tr>
+
+                    {group.rows.map((e) => (
+                      <tr
+                        key={e.id}
+                        style={{
+                          borderBottom: "1px solid rgba(255,255,255,0.06)",
+                        }}
+                      >
+                        <td style={{ padding: "8px 10px" }}>
+                          {e.entry_date ?? "-"}
+                        </td>
+                        <td style={{ padding: "8px 10px" }}>
+                          {e.category ?? "-"}
+                        </td>
+                        <td style={{ padding: "8px 10px" }}>
+                          {typeof e.amount === "number"
+                            ? `$${e.amount.toFixed(2)}`
+                            : "-"}
+                        </td>
+                        <td style={{ padding: "8px 10px" }}>
+                          {typeof e.tach_hours === "number" ? e.tach_hours : "-"}
+                        </td>
+                        <td style={{ padding: "8px 10px" }}>{e.notes ?? "-"}</td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div style={{ marginTop: 10, ...smallMuted }}>
+          Next: per-aircraft dashboard + better filters.
         </div>
       </div>
     </div>
