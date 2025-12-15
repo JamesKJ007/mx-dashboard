@@ -269,7 +269,7 @@ export default function Home() {
                 <input
                   value={tailNumber}
                   onChange={(e) => setTailNumber(e.target.value)}
-                  placeholder="N787WT"
+                  placeholder="N123AB"
                   style={{ padding: 10, borderRadius: 8, border: "1px solid #444" }}
                 />
               </div>
@@ -299,7 +299,7 @@ export default function Home() {
                 <input
                   value={year}
                   onChange={(e) => setYear(e.target.value)}
-                  placeholder="1978"
+                  placeholder="1975"
                   style={{ padding: 10, borderRadius: 8, border: "1px solid #444" }}
                 />
               </div>
