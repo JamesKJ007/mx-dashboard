@@ -353,6 +353,19 @@ export default function Home() {
               </li>
             ))}
           </ul>
+                  <div
+          style={{
+            marginTop: 40,
+            paddingTop: 12,
+            borderTop: "1px solid #333",
+            fontSize: 12,
+            opacity: 0.7,
+            textAlign: "center",
+          }}
+        >
+          <Link href="/terms">Terms of Service</Link> ·{" "}
+          <Link href="/privacy">Privacy Policy</Link>
+        </div>
         </>
       )}
     </main>
@@ -362,6 +375,7 @@ export default function Home() {
 function PasswordLoginBox({ onError }: { onError: (msg: string | null) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [busy, setBusy] = useState(false);
@@ -384,10 +398,15 @@ function PasswordLoginBox({ onError }: { onError: (msg: string | null) => void }
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       } else {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        alert("Account created ✅ If you’re asked to confirm email, check your inbox.");
-      }
+  if (!acceptedTerms) {
+    onError("You must accept the Terms of Service to continue.");
+    return;
+  }
+
+  const { error } = await supabase.auth.signUp({ email, password });
+  if (error) throw error;
+  alert("Account created ✅ If you’re asked to confirm email, check your inbox.");
+}
     } catch (e: any) {
       onError(e?.message ?? "Auth error");
     } finally {
@@ -415,6 +434,25 @@ function PasswordLoginBox({ onError }: { onError: (msg: string | null) => void }
         type="password"
         style={{ padding: 10, borderRadius: 8, border: "1px solid #444" }}
       />
+
+{mode === "signup" && (
+  <label style={{ fontSize: 13, opacity: 0.85 }}>
+    <input
+      type="checkbox"
+      checked={acceptedTerms}
+      onChange={(e) => setAcceptedTerms(e.target.checked)}
+      style={{ marginRight: 8 }}
+    />
+    I agree to the{" "}
+    <a href="/terms" target="_blank" rel="noreferrer">
+      Terms of Service
+    </a>{" "}
+    and{" "}
+    <a href="/privacy" target="_blank" rel="noreferrer">
+      Privacy Policy
+    </a>
+  </label>
+)}
 
       <div style={{ display: "flex", gap: 10 }}>
         <button onClick={handleSubmit} disabled={busy} style={{ padding: "10px 14px" }}>
