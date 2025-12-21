@@ -37,6 +37,11 @@ type BenchmarkRow = {
   effective_date: string; // YYYY-MM-DD
 };
 
+// READ from the view (timeline/ordering/analytics)
+const ENTRIES_READ = "maintenance_entries_timeline";
+// WRITE to the real table (insert/update/delete must hit a table, not a view)
+const ENTRIES_WRITE = "maintenance_entries";
+
 export default function AircraftMaintenancePage() {
   const params = useParams();
   const router = useRouter();
@@ -57,18 +62,27 @@ export default function AircraftMaintenancePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>("");
 
-  // ✅ Benchmark
+  // ---- Benchmark
   const [benchmark, setBenchmark] = useState<BenchmarkRow | null>(null);
 
-  // ---- Form
+  // ---- Add Form
   const [entryDate, setEntryDate] = useState("");
   const [category, setCategory] = useState("Maintenance");
   const [amount, setAmount] = useState("");
   const [tachHours, setTachHours] = useState("");
   const [notes, setNotes] = useState("");
-
-  // ✅ Toggle panel for Add Entry
   const [showAddEntry, setShowAddEntry] = useState(false);
+
+  // ---- Edit state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editCategory, setEditCategory] = useState("Maintenance");
+  const [editAmount, setEditAmount] = useState("");
+  const [editTach, setEditTach] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+
+  // ---- 3-dot menu state
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const ALLOWED_CATEGORIES = [
     "Maintenance",
@@ -131,6 +145,65 @@ export default function AircraftMaintenancePage() {
     background: "transparent",
   };
 
+  const iconButton: CSSProperties = {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.15)",
+    background: "rgba(255,255,255,0.08)",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: 900,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  };
+
+  const menuWrap: CSSProperties = {
+    position: "relative",
+    display: "inline-block",
+  };
+
+  const menuPanel: CSSProperties = {
+    position: "absolute",
+    right: 0,
+    top: 42,
+    minWidth: 140,
+    borderRadius: 12,
+    background: "#0b1226",
+    border: "1px solid rgba(255,255,255,0.12)",
+    boxShadow: "0 12px 28px rgba(0,0,0,0.35)",
+    zIndex: 50,
+    overflow: "hidden",
+  };
+
+  const menuItem: CSSProperties = {
+    width: "100%",
+    padding: "10px 12px",
+    background: "transparent",
+    border: "none",
+    color: "white",
+    textAlign: "left",
+    cursor: "pointer",
+    fontWeight: 700,
+  };
+
+  // ---- Close menu on outside click / Esc
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpenMenuId(null);
+    }
+    function onClick() {
+      setOpenMenuId(null);
+    }
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("click", onClick);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("click", onClick);
+    };
+  }, []);
+
   // ---- Auth bootstrap
   useEffect(() => {
     let mounted = true;
@@ -182,8 +255,9 @@ export default function AircraftMaintenancePage() {
       if (aircraftErr) throw aircraftErr;
       setAircraft(aircraftData ?? null);
 
+      // ✅ READ from view
       const { data: entryData, error: entryErr } = await supabase
-        .from("maintenance_entries")
+        .from(ENTRIES_READ)
         .select(
           "id, user_id, aircraft_id, entry_date, category, amount, tach_hours, notes, created_at"
         )
@@ -194,7 +268,6 @@ export default function AircraftMaintenancePage() {
       if (entryErr) throw entryErr;
       setEntries(entryData ?? []);
 
-      // ✅ Load benchmark (latest row, forgiving aircraft_type values)
       const { data: benchData, error: benchErr } = await supabase
         .from("maintenance_benchmarks")
         .select("id, aircraft_type, hourly_cost, annual_cost, effective_date")
@@ -217,9 +290,13 @@ export default function AircraftMaintenancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aircraftId]);
 
-  // ---- Calculations (All-time)
+  // ---- Calculations (all-time)
   const totalSpend = useMemo(
-    () => entries.reduce((sum, e) => sum + (e.amount ?? 0), 0),
+    () =>
+      entries.reduce(
+        (sum, e) => sum + (typeof e.amount === "number" ? e.amount : 0),
+        0
+      ),
     [entries]
   );
 
@@ -240,7 +317,7 @@ export default function AircraftMaintenancePage() {
     return hoursFlown > 0 ? totalSpend / hoursFlown : null;
   }, [hoursFlown, totalSpend]);
 
-  // ✅ benchmark comparison
+  // ---- Benchmark compare
   const benchmarkCompare = useMemo(() => {
     if (!benchmark) return null;
     if (benchmark.hourly_cost <= 0) return null;
@@ -257,17 +334,15 @@ export default function AircraftMaintenancePage() {
     };
   }, [benchmark, costPerHour]);
 
-  // ✅ R/Y/G status for benchmark (based on % off)
   const benchmarkStatus = useMemo(() => {
     if (!benchmarkCompare) return null;
-
     const absPct = Math.abs(benchmarkCompare.pct);
-
-    if (absPct <= 10) return { label: "On track", color: "#22c55e" }; // green
-    if (absPct <= 25) return { label: "Watch", color: "#f59e0b" }; // yellow
-    return { label: "High", color: "#ef4444" }; // red
+    if (absPct <= 10) return { label: "On track", color: "#22c55e" };
+    if (absPct <= 25) return { label: "Watch", color: "#f59e0b" };
+    return { label: "High", color: "#ef4444" };
   }, [benchmarkCompare]);
 
+  // ---- Add Entry (allows backdated + lower tach)
   async function addEntry(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
@@ -289,25 +364,19 @@ export default function AircraftMaintenancePage() {
       return setError("Tach Hours must be a number.");
     }
 
-    const latestTach = entries
-      .map((x) => x.tach_hours)
-      .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
-      .sort((a, b) => b - a)[0];
-
-    if (
-      typeof tachNum === "number" &&
-      typeof latestTach === "number" &&
-      tachNum < latestTach
-    ) {
-      setSaving(false);
-      return setError(
-        `Tach hours cannot go backwards. Latest recorded tach is ${latestTach}.`
-      );
-    }
-
+    // ✅ If cost is entered, require tach (keeps cost/hr sane)
     if (amountNum !== null && tachNum === null) {
       setSaving(false);
       return setError("Tach hours are required when entering a cost.");
+    }
+
+    // Date is optional, but must be valid if provided
+    if (
+      entryDate.trim() !== "" &&
+      !/^\d{4}-\d{2}-\d{2}$/.test(entryDate.trim())
+    ) {
+      setSaving(false);
+      return setError("Date must be YYYY-MM-DD (or leave blank).");
     }
 
     const safeCategory = ALLOWED_CATEGORIES.includes(category)
@@ -324,8 +393,9 @@ export default function AircraftMaintenancePage() {
       notes: notes.trim() === "" ? null : notes.trim(),
     };
 
+    // ✅ WRITE to table (not view)
     const { error: insErr } = await supabase
-      .from("maintenance_entries")
+      .from(ENTRIES_WRITE)
       .insert(payload);
 
     if (insErr) {
@@ -341,33 +411,118 @@ export default function AircraftMaintenancePage() {
     setTachHours("");
     setNotes("");
     setSaving(false);
-
     setShowAddEntry(false);
   }
 
-  // ✅ Group entries by YEAR
+  // ---- Edit helpers
+  function startEdit(row: MxEntryRow) {
+    setOpenMenuId(null);
+    setEditingId(row.id);
+    setEditDate(row.entry_date ?? "");
+    setEditCategory(
+      ALLOWED_CATEGORIES.includes(row.category ?? "")
+        ? (row.category as string)
+        : "Maintenance"
+    );
+    setEditAmount(row.amount == null ? "" : String(row.amount));
+    setEditTach(row.tach_hours == null ? "" : String(row.tach_hours));
+    setEditNotes(row.notes ?? "");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditDate("");
+    setEditCategory("Maintenance");
+    setEditAmount("");
+    setEditTach("");
+    setEditNotes("");
+  }
+
+  async function saveEdit(id: string) {
+    setError("");
+    setSaving(true);
+
+    const amountNum = editAmount.trim() === "" ? null : Number(editAmount);
+    const tachNum = editTach.trim() === "" ? null : Number(editTach);
+
+    if (amountNum !== null && Number.isNaN(amountNum)) {
+      setSaving(false);
+      return setError("Amount must be a number.");
+    }
+    if (tachNum !== null && Number.isNaN(tachNum)) {
+      setSaving(false);
+      return setError("Tach Hours must be a number.");
+    }
+    if (amountNum !== null && tachNum === null) {
+      setSaving(false);
+      return setError("Tach hours are required when entering a cost.");
+    }
+    if (
+      editDate.trim() !== "" &&
+      !/^\d{4}-\d{2}-\d{2}$/.test(editDate.trim())
+    ) {
+      setSaving(false);
+      return setError("Date must be YYYY-MM-DD (or leave blank).");
+    }
+
+    const patch = {
+      entry_date: editDate.trim() === "" ? null : editDate.trim(),
+      category: ALLOWED_CATEGORIES.includes(editCategory)
+        ? editCategory
+        : "Maintenance",
+      amount: amountNum,
+      tach_hours: tachNum,
+      notes: editNotes.trim() === "" ? null : editNotes.trim(),
+    };
+
+    // ✅ WRITE to table (not view)
+    const { error } = await supabase
+      .from(ENTRIES_WRITE)
+      .update(patch)
+      .eq("id", id);
+
+    if (error) {
+      setSaving(false);
+      return setError(error.message);
+    }
+
+    await loadAll();
+    setSaving(false);
+    cancelEdit();
+  }
+
+  async function deleteEntry(id: string) {
+    setOpenMenuId(null);
+    if (!confirm("Delete this entry?")) return;
+
+    setError("");
+    setSaving(true);
+
+    // ✅ WRITE to table (not view)
+    const { error } = await supabase.from(ENTRIES_WRITE).delete().eq("id", id);
+
+    if (error) {
+      setSaving(false);
+      return setError(error.message);
+    }
+
+    await loadAll();
+    setSaving(false);
+    if (editingId === id) cancelEdit();
+  }
+
+  // ---- Group entries by YEAR (keeps your existing entry order)
   const entriesByYear = useMemo(() => {
     const withDates = entries.filter((e) => !!e.entry_date);
-
-    const withoutDates = entries
-      .filter((e) => !e.entry_date)
-      .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
-
-    const sorted = [...withDates].sort((a, b) =>
-      (b.entry_date ?? "").localeCompare(a.entry_date ?? "")
-    );
+    const withoutDates = entries.filter((e) => !e.entry_date);
 
     const groups: { year: string; rows: MxEntryRow[] }[] = [];
 
-    for (const row of sorted) {
+    for (const row of withDates) {
       const year = (row.entry_date ?? "").slice(0, 4) || "Unknown";
       const last = groups[groups.length - 1];
-
-      if (!last || last.year !== year) {
-        groups.push({ year, rows: [row] });
-      } else {
-        last.rows.push(row);
-      }
+      if (!last || last.year !== year) groups.push({ year, rows: [row] });
+      else last.rows.push(row);
     }
 
     if (withoutDates.length > 0) {
@@ -476,15 +631,15 @@ export default function AircraftMaintenancePage() {
         </div>
       </div>
 
-      {/* ✅ Benchmark Card (R/Y/G lives ONLY here) */}
+      {/* Benchmark Card */}
       <div style={{ ...cardDark, marginBottom: 18 }}>
         <div style={smallMuted}>Industry Estimated Benchmark (C172)</div>
 
         {!benchmark ? (
           <div style={{ marginTop: 8, opacity: 0.85 }}>
             No industry estimate found yet. Add one to{" "}
-<code>maintenance_benchmarks</code> for{" "}
-<b>aircraft_type = "C172"</b> (or 172 / 172N / C172N).
+            <code>maintenance_benchmarks</code> for{" "}
+            <b>aircraft_type = "C172"</b> (or 172 / 172N / C172N).
           </div>
         ) : (
           <div style={{ marginTop: 8 }}>
@@ -506,7 +661,6 @@ export default function AircraftMaintenancePage() {
             >
               {benchmarkCompare ? (
                 <>
-                  {/* ✅ Status pill */}
                   {benchmarkStatus && (
                     <span
                       style={{
@@ -528,12 +682,15 @@ export default function AircraftMaintenancePage() {
                       <>You’re basically right on average ✅</>
                     ) : benchmarkCompare.above ? (
                       <>
-                        You’re <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b>{" "}
-above the industry estimate (≈ ${benchmarkCompare.diff.toFixed(2)} / hr) 📈
+                        You’re{" "}
+                        <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b>{" "}
+                        above the industry estimate (≈ $
+                        {benchmarkCompare.diff.toFixed(2)} / hr) 📈
                       </>
                     ) : (
                       <>
-                        You’re <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b>{" "}
+                        You’re{" "}
+                        <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b>{" "}
                         below the industry estimate (≈ $
                         {Math.abs(benchmarkCompare.diff).toFixed(2)} / hr) 📉
                       </>
@@ -570,7 +727,7 @@ above the industry estimate (≈ ${benchmarkCompare.diff.toFixed(2)} / hr) 📈
         </div>
       </div>
 
-      {/* Entries table */}
+      {/* Entries section */}
       <div style={cardLight}>
         <div
           style={{
@@ -585,6 +742,7 @@ above the industry estimate (≈ ${benchmarkCompare.diff.toFixed(2)} / hr) 📈
 
           <button
             style={buttonStyle}
+            type="button"
             onClick={() => setShowAddEntry((v) => !v)}
           >
             {showAddEntry ? "Close" : "+ Add Entry"}
@@ -606,12 +764,12 @@ above the industry estimate (≈ ${benchmarkCompare.diff.toFixed(2)} / hr) 📈
                 }}
               >
                 <label style={{ display: "grid", gap: 6 }}>
-                  <span style={smallMuted}>Date</span>
+                  <span style={smallMuted}>Date (optional)</span>
                   <input
                     style={inputStyle}
+                    type="date"
                     value={entryDate}
                     onChange={(e) => setEntryDate(e.target.value)}
-                    placeholder="YYYY-MM-DD"
                   />
                 </label>
 
@@ -634,6 +792,7 @@ above the industry estimate (≈ ${benchmarkCompare.diff.toFixed(2)} / hr) 📈
                   <span style={smallMuted}>Amount ($)</span>
                   <input
                     style={inputStyle}
+                    inputMode="decimal"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     placeholder="e.g. 245.00"
@@ -644,6 +803,7 @@ above the industry estimate (≈ ${benchmarkCompare.diff.toFixed(2)} / hr) 📈
                   <span style={smallMuted}>Tach Hours</span>
                   <input
                     style={inputStyle}
+                    inputMode="decimal"
                     value={tachHours}
                     onChange={(e) => setTachHours(e.target.value)}
                     placeholder="e.g. 1834.6"
@@ -693,6 +853,7 @@ above the industry estimate (≈ ${benchmarkCompare.diff.toFixed(2)} / hr) 📈
                   <th style={{ padding: "8px 10px" }}>Amount</th>
                   <th style={{ padding: "8px 10px" }}>Tach</th>
                   <th style={{ padding: "8px 10px" }}>Notes</th>
+                  <th style={{ padding: "8px 10px", width: 90 }}> </th>
                 </tr>
               </thead>
 
@@ -701,13 +862,13 @@ above the industry estimate (≈ ${benchmarkCompare.diff.toFixed(2)} / hr) 📈
                   <Fragment key={group.year}>
                     {idx !== 0 && (
                       <tr>
-                        <td colSpan={5} style={{ padding: 0, height: 12 }} />
+                        <td colSpan={6} style={{ padding: 0, height: 12 }} />
                       </tr>
                     )}
 
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={6}
                         style={{
                           padding: "14px 10px 6px",
                           fontWeight: 900,
@@ -720,30 +881,164 @@ above the industry estimate (≈ ${benchmarkCompare.diff.toFixed(2)} / hr) 📈
                       </td>
                     </tr>
 
-                    {group.rows.map((e) => (
-                      <tr
-                        key={e.id}
-                        style={{
-                          borderBottom: "1px solid rgba(255,255,255,0.06)",
-                        }}
-                      >
-                        <td style={{ padding: "8px 10px" }}>
-                          {e.entry_date ?? "-"}
-                        </td>
-                        <td style={{ padding: "8px 10px" }}>
-                          {e.category ?? "-"}
-                        </td>
-                        <td style={{ padding: "8px 10px" }}>
-                          {typeof e.amount === "number"
-                            ? `$${e.amount.toFixed(2)}`
-                            : "-"}
-                        </td>
-                        <td style={{ padding: "8px 10px" }}>
-                          {typeof e.tach_hours === "number" ? e.tach_hours : "-"}
-                        </td>
-                        <td style={{ padding: "8px 10px" }}>{e.notes ?? "-"}</td>
-                      </tr>
-                    ))}
+                    {group.rows.map((r) => {
+                      const isEditing = editingId === r.id;
+
+                      return (
+                        <tr
+                          key={r.id}
+                          style={{
+                            borderBottom: "1px solid rgba(255,255,255,0.06)",
+                          }}
+                        >
+                          <td style={{ padding: "8px 10px", width: 160 }}>
+                            {isEditing ? (
+                              <input
+                                style={{ ...inputStyle, width: "100%" }}
+                                type="date"
+                                value={editDate}
+                                onChange={(e) => setEditDate(e.target.value)}
+                              />
+                            ) : (
+                              r.entry_date ?? "-"
+                            )}
+                          </td>
+
+                          <td style={{ padding: "8px 10px", width: 160 }}>
+                            {isEditing ? (
+                              <select
+                                style={{ ...inputStyle, width: "100%" }}
+                                value={editCategory}
+                                onChange={(e) =>
+                                  setEditCategory(e.target.value)
+                                }
+                              >
+                                {ALLOWED_CATEGORIES.map((c) => (
+                                  <option
+                                    key={c}
+                                    value={c}
+                                    style={{ color: "black" }}
+                                  >
+                                    {c}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              r.category ?? "-"
+                            )}
+                          </td>
+
+                          <td style={{ padding: "8px 10px", width: 140 }}>
+                            {isEditing ? (
+                              <input
+                                style={{ ...inputStyle, width: "100%" }}
+                                inputMode="decimal"
+                                value={editAmount}
+                                onChange={(e) => setEditAmount(e.target.value)}
+                                placeholder="245.00"
+                              />
+                            ) : typeof r.amount === "number" ? (
+                              `$${r.amount.toFixed(2)}`
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+
+                          <td style={{ padding: "8px 10px", width: 120 }}>
+                            {isEditing ? (
+                              <input
+                                style={{ ...inputStyle, width: "100%" }}
+                                inputMode="decimal"
+                                value={editTach}
+                                onChange={(e) => setEditTach(e.target.value)}
+                                placeholder="1834.6"
+                              />
+                            ) : typeof r.tach_hours === "number" ? (
+                              r.tach_hours
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+
+                          <td style={{ padding: "8px 10px" }}>
+                            {isEditing ? (
+                              <input
+                                style={{ ...inputStyle, width: "100%" }}
+                                value={editNotes}
+                                onChange={(e) => setEditNotes(e.target.value)}
+                                placeholder="Notes"
+                              />
+                            ) : (
+                              r.notes ?? "-"
+                            )}
+                          </td>
+
+                          <td style={{ padding: "8px 10px" }}>
+                            {!isEditing ? (
+                              <div
+                                style={menuWrap}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  style={iconButton}
+                                  aria-label="Row actions"
+                                  onClick={() =>
+                                    setOpenMenuId((cur) =>
+                                      cur === r.id ? null : r.id
+                                    )
+                                  }
+                                  disabled={saving}
+                                >
+                                  ⋮
+                                </button>
+
+                                {openMenuId === r.id && (
+                                  <div style={menuPanel}>
+                                    <button
+                                      type="button"
+                                      style={menuItem}
+                                      onClick={() => startEdit(r)}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      style={{
+                                        ...menuItem,
+                                        color: "#fecaca",
+                                      }}
+                                      onClick={() => deleteEntry(r.id)}
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div style={{ display: "flex", gap: 8 }}>
+                                <button
+                                  type="button"
+                                  style={buttonStyle}
+                                  disabled={saving}
+                                  onClick={() => saveEdit(r.id)}
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  style={ghostButton}
+                                  disabled={saving}
+                                  onClick={cancelEdit}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </Fragment>
                 ))}
               </tbody>
@@ -752,7 +1047,8 @@ above the industry estimate (≈ ${benchmarkCompare.diff.toFixed(2)} / hr) 📈
         )}
 
         <div style={{ marginTop: 10, ...smallMuted }}>
-          Next: per-aircraft dashboard + better filters.
+          ✅ Edits/deletes work because writes go to{" "}
+          <code>{ENTRIES_WRITE}</code> (not the view).
         </div>
       </div>
     </div>
