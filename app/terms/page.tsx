@@ -1,52 +1,76 @@
 export default function TermsPage() {
   const termsText = `
-Terms of Service (Beta)
+Terms of Service — MyPlaneMX
 
-Last Updated: December 15, 2025
+Effective Date: December 21, 2025
+Last Updated: December 21, 2025
 
-Welcome to MyPlane MX (the "Service"), operated by MyPlane ("we," "us," or "our"). By creating an account or using the Service, you agree to these Terms of Service ("Terms").
+These Terms of Service ("Terms") govern your access to and use of the MyPlaneMX website, web application, and related services (collectively, the "Service"). The Service is operated by MyPlaneMX ("MyPlaneMX," "we," "us," or "our").
 
-1. Beta Software Notice
-MyPlane MX is provided as beta software for testing and feedback purposes. The Service may contain bugs, errors, or incomplete features and may change, be modified, suspended, or discontinued at any time without notice.
-The Service is provided "as is" and "as available", without warranties of any kind, express or implied.
+By creating an account or using the Service, you agree to these Terms. If you do not agree, do not use the Service.
 
-2. Eligibility & Accounts
-You must provide accurate and complete information when creating an account.
-You are responsible for maintaining the confidentiality of your login credentials.
-You are responsible for all activity that occurs under your account.
-Accounts are provided on a limited-access basis during beta testing.
+1. Eligibility
+You must be at least 18 years old (or the age of majority in your jurisdiction) to use the Service. By using the Service, you represent that you meet this requirement.
 
-3. License & Acceptable Use
+2. Accounts
+You may be required to create an account to use the Service. You agree to provide accurate, current information and to keep it updated.
+You are responsible for maintaining the confidentiality of your login credentials and for all activity that occurs under your account.
+
+3. Nature of the Service (Informational Only)
+MyPlaneMX provides tools for tracking, organizing, and analyzing aircraft-related cost and maintenance data you enter.
+The Service does NOT provide:
+- Aircraft maintenance advice
+- Airworthiness determinations
+- FAA regulatory or compliance guidance
+- Legal, financial, or tax advice
+
+You are solely responsible for verifying accuracy, ensuring compliance, and making all operational and maintenance decisions.
+
+4. License and Acceptable Use
 We grant you a limited, non-exclusive, non-transferable, revocable license to access and use the Service solely for its intended purpose.
-You agree not to:
-- Copy, modify, reverse engineer, decompile, or attempt to extract source code or logic from the Service.
-- Share screenshots, recordings, workflows, calculations, benchmarks, or documentation of the Service outside your organization without written permission.
-- Use the Service to design, develop, fund, or support a competing product or service.
-- Resell, sublicense, or commercially exploit the Service.
-- Circumvent security, access controls, or usage limitations.
 
-4. Ownership & Intellectual Property
-All software, algorithms, calculations, analytics, benchmarks, designs, interfaces, and content within the Service are the exclusive property of MyPlane.
+You agree NOT to:
+- Copy, modify, reverse engineer, decompile, or attempt to extract source code, algorithms, or logic
+- Share screenshots, recordings, workflows, benchmarks, calculations, or documentation outside your organization without written permission
+- Use the Service to build, fund, or support a competing product or service
+- Resell, sublicense, or commercially exploit the Service
+- Circumvent security measures, access controls, or usage limits
+
+5. Intellectual Property
+All software, designs, interfaces, algorithms, analytics, benchmarks, and content within the Service (excluding your data) are the exclusive property of MyPlaneMX and are protected by intellectual property laws.
 No rights are granted except as expressly stated in these Terms.
 
-5. User Data & Content
-You retain ownership of the data you input into the Service.
-By using the Service, you grant MyPlane permission to store, process, analyze, and display this data solely to operate, improve, and support the Service.
-During beta testing, data may be modified or removed as part of testing.
+6. User Data
+You retain ownership of the data you enter into the Service.
+By using the Service, you grant MyPlaneMX a limited license to host, store, process, analyze, and display your data solely to operate, support, and improve the Service.
 
-6. Admin Access & Monitoring
-Designated administrators may have access to aggregated or account-level data for the purposes of support, troubleshooting, analytics, and product improvement.
+7. Admin Access and Monitoring
+Authorized administrators may access aggregated or account-level data for the purposes of:
+- Customer support
+- Troubleshooting
+- Analytics
+- Product improvement
 
-7. Termination
-We may suspend or terminate your access to the Service at any time, with or without notice.
+8. Termination
+You may stop using the Service at any time.
+We may suspend or terminate access to the Service if you violate these Terms or if your use poses risk to the Service, other users, or MyPlaneMX.
 
-8. Limitation of Liability
-To the fullest extent permitted by law, MyPlane shall not be liable for any indirect, incidental, special, consequential, or loss-of-use damages arising out of or related to your use of the Service.
+9. Disclaimer of Warranties
+THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE."
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, MYPLANEMX DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+We do not guarantee uninterrupted access or error-free operation.
 
-9. Changes to These Terms
-We may update these Terms at any time. Continued use of the Service after changes constitutes acceptance of the updated Terms.
+10. Limitation of Liability
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, MYPLANEMX SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR LOSS-OF-USE DAMAGES ARISING FROM OR RELATED TO THE SERVICE.
+IN NO EVENT SHALL MYPLANEMX’S TOTAL LIABILITY EXCEED THE AMOUNT YOU PAID FOR THE SERVICE IN THE PRIOR 12 MONTHS (OR $100 IF NO FEES WERE PAID).
 
-10. Contact
+11. Changes to These Terms
+We may update these Terms from time to time. Continued use of the Service after changes constitutes acceptance of the updated Terms.
+
+12. Governing Law
+These Terms are governed by the laws of the United States and the state in which MyPlaneMX operates, without regard to conflict-of-law principles.
+
+13. Contact
 Questions about these Terms may be sent to:
 support@myplanemx.com
 `;
