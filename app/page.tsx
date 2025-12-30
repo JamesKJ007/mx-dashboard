@@ -121,11 +121,17 @@ export default function Home() {
       return;
     }
 
-   const { data, error } = await supabase
+  let query = supabase
   .from("aircraft")
   .select("*")
-  .eq("user_id", userId)
   .order("created_at", { ascending: false });
+
+// Admin sees all aircraft, normal users see only theirs
+if (!isAdmin) {
+  query = query.eq("user_id", userId);
+}
+
+const { data, error } = await query;
 
     if (error) {
       setError(error.message);
@@ -137,10 +143,11 @@ export default function Home() {
     setLoading(false);
   }
 
-  useEffect(() => {
-    loadAircraft();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+useEffect(() => {
+  if (adminLoading) return;
+  loadAircraft();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [userId, isAdmin, adminLoading]);
 
   async function handleLogout() {
     setError(null);
