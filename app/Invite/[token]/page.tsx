@@ -23,11 +23,11 @@ export default function InviteAcceptPage() {
 
         // must be logged in to accept
         const { data } = await supabase.auth.getSession();
-        if (!data.session) {
-          setError("You must log in to accept this invite.");
-          setLoading(false);
-          return;
-        }
+      if (!data.session) {
+  // send them to login, then come right back here
+  router.replace(`/login?next=/invite/${token}`);
+  return;
+}
 
         const { data: inv, error: invErr } = await supabase
           .from("aircraft_invites")

@@ -1,21 +1,34 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 
+function safeNextPath(raw: string | null) {
+  // Only allow internal paths to prevent open-redirect issues.
+  if (!raw) return null;
+  if (!raw.startsWith("/")) return null;
+  if (raw.startsWith("//")) return null;
+  return raw;
+}
+
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
 
-  // ✅ If already logged in, kick them to /app
+  const nextPath = useMemo(() => {
+    return safeNextPath(searchParams.get("next")) || "/app";
+  }, [searchParams]);
+
+  // ✅ If already logged in, send them to next (or /app)
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();
-      if (data.session) router.replace("/app");
+      if (data.session) router.replace(nextPath);
     })();
-  }, [router]);
+  }, [router, nextPath]);
 
   return (
     <main style={{ padding: 24, maxWidth: 600 }}>
@@ -27,7 +40,10 @@ export default function LoginPage() {
 
       {error && <p style={{ color: "tomato" }}>{error}</p>}
 
-      <PasswordLoginBox onError={setError} onSuccess={() => router.replace("/app")} />
+      <PasswordLoginBox
+        onError={setError}
+        onSuccess={() => router.replace(nextPath)}
+      />
     </main>
   );
 }
@@ -61,7 +77,10 @@ function PasswordLoginBox({
       }
 
       if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
         if (error) throw error;
 
         // ✅ redirect after login
@@ -75,8 +94,11 @@ function PasswordLoginBox({
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
 
-        alert("Account created ✅ If you’re asked to confirm email, check your inbox.");
-        // Optional: if you want, you can redirect after signup too:
+        alert(
+          "Account created ✅ If you’re asked to confirm email, check your inbox."
+        );
+
+        // Optional: If your project does NOT require email confirmation, you can redirect right away:
         // onSuccess();
       }
     } catch (e: any) {
@@ -127,7 +149,11 @@ function PasswordLoginBox({
       )}
 
       <div style={{ display: "flex", gap: 10 }}>
-        <button onClick={handleSubmit} disabled={busy} style={{ padding: "10px 14px" }}>
+        <button
+          onClick={handleSubmit}
+          disabled={busy}
+          style={{ padding: "10px 14px" }}
+        >
           {busy ? "Working…" : mode === "login" ? "Login" : "Sign Up"}
         </button>
 
