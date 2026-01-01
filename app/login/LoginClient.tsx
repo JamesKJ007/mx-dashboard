@@ -7,15 +7,13 @@ import { supabase } from "@/lib/supabaseClient";
 
 export default function LoginClient() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const sp = useSearchParams();
   const [error, setError] = useState<string | null>(null);
 
-  const nextUrl = useMemo(() => {
-    const n = searchParams.get("next");
-    if (n && n.startsWith("/")) return n;
-    return "/app";
-  }, [searchParams]);
+  // Read ?next=/invite/xyz
+  const nextUrl = useMemo(() => sp.get("next") || "/app", [sp]);
 
+  // ✅ If already logged in, go to nextUrl (not always /app)
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();
@@ -36,7 +34,6 @@ export default function LoginClient() {
       <PasswordLoginBox
         onError={setError}
         onSuccess={() => router.replace(nextUrl)}
-        nextUrl={nextUrl}
       />
     </main>
   );
@@ -45,18 +42,13 @@ export default function LoginClient() {
 function PasswordLoginBox({
   onError,
   onSuccess,
-  nextUrl,
 }: {
   onError: (msg: string | null) => void;
   onSuccess: () => void;
-  nextUrl: string;
 }) {
-  const router = useRouter();
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
-
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [busy, setBusy] = useState(false);
 
@@ -65,31 +57,30 @@ function PasswordLoginBox({
     setBusy(true);
 
     try {
-      if (!email.includes("@")) {
-        onError("Enter a valid email.");
-        return;
-      }
-      if (password.length < 6) {
-        onError("Password must be at least 6 characters.");
-        return;
-      }
+      if (!email.includes("@")) throw new Error("Enter a valid email.");
+      if (password.length < 6) throw new Error("Password must be at least 6 characters.");
 
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         onSuccess();
-      } else {
-        if (!acceptedTerms) {
-          onError("You must accept the Terms of Service to continue.");
-          return;
-        }
-
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-
-        alert("Account created ✅ If you’re asked to confirm email, check your inbox.");
-        router.replace(nextUrl);
+        return;
       }
+
+      // signup
+      if (!acceptedTerms) throw new Error("You must accept the Terms of Service to continue.");
+
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error) throw error;
+
+      // If email confirmation is ON, session may be null
+      // In that case, user must confirm email, then come back and login.
+      if (!data.session) {
+        alert("Account created ✅ Please confirm your email, then return and log in.");
+        return;
+      }
+
+      onSuccess();
     } catch (e: any) {
       onError(e?.message ?? "Auth error");
     } finally {

@@ -23,11 +23,11 @@ export default function InviteAcceptPage() {
         setLoading(true);
 
         // Must be logged in to accept — preserve token via ?next=
-        const { data: sessionData } = await supabase.auth.getSession();
-        if (!sessionData.session) {
-          router.replace(`/login?next=/invite/${token}`);
-          return;
-        }
+   const { data: sessionData } = await supabase.auth.getSession();
+if (!sessionData.session) {
+  router.replace(`/login?next=${encodeURIComponent(`/invite/${token}`)}`);
+  return;
+}
 
         const { data: inv, error: invErr } = await supabase
           .from("aircraft_invites")
