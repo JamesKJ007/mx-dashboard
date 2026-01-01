@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import MonthlyCostChart from "../../components/MonthlyCostChart";
 import CostPerHourTrendChart from "../../components/CostPerHourTrendChart";
+import InviteMemberBox from "../../components/InviteMemberBox";
 
 type AircraftRow = {
   id: string;
@@ -237,6 +238,12 @@ export default function AircraftMaintenancePage() {
       sub?.subscription?.unsubscribe();
     };
   }, []);
+
+  // ---- Protect page (redirect if not logged in)
+useEffect(() => {
+  if (authLoading) return;
+  if (!userId) router.replace("/login");
+}, [authLoading, userId, router]);
 
   // ---- Load aircraft + entries + benchmark
   async function loadAll() {
@@ -551,9 +558,9 @@ export default function AircraftMaintenancePage() {
           marginBottom: 10,
         }}
       >
-        <button style={ghostButton} onClick={() => router.push("/")}>
-          ← Back to Aircraft
-        </button>
+        <button style={ghostButton} onClick={() => router.push("/app")}>
+  ← Back to Aircraft
+</button>
 
         <h1 style={{ margin: 0 }}>Aircraft MX ✈️</h1>
 
@@ -599,6 +606,7 @@ export default function AircraftMaintenancePage() {
           </div>
         )}
       </div>
+      <InviteMemberBox aircraftId={String(aircraftId)} role="member" />
 
       {/* Summary Cards */}
       <div
