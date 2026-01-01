@@ -11,49 +11,21 @@ export default function InviteAcceptPage() {
   const token = String(params?.token || "");
 
   const [loading, setLoading] = useState(true);
-  const [invite, setInvite] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
-      try {
-        setError(null);
-        setInvite(null);
-        setLoading(true);
+      setError(null);
+      setLoading(true);
 
-        // Must be logged in to accept — preserve token via ?next=
-   const { data: sessionData } = await supabase.auth.getSession();
-if (!sessionData.session) {
-  router.replace(`/login?next=${encodeURIComponent(`/invite/${token}`)}`);
-  return;
-}
-
-        const { data: inv, error: invErr } = await supabase
-          .from("aircraft_invites")
-          .select("*")
-          .eq("token", token)
-          .maybeSingle();
-
-        // Always handle Supabase error first
-        if (invErr) throw invErr;
-
-        if (!inv) {
-          setError("Invite not found or already used.");
-          return;
-        }
-
-        if (inv.status !== "pending") {
-          setError("This invite has already been used or is no longer valid.");
-          return;
-        }
-
-        setInvite(inv);
-      } catch (e: any) {
-        setError(e?.message ?? "Failed to load invite.");
-      } finally {
-        setLoading(false);
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        router.replace(`/login?next=${encodeURIComponent(`/invite/${token}`)}`);
+        return;
       }
+
+      setLoading(false);
     })();
   }, [token, router]);
 
@@ -62,41 +34,14 @@ if (!sessionData.session) {
     setError(null);
 
     try {
-      const {
-        data: { user },
-        error: userErr,
-      } = await supabase.auth.getUser();
+      const { data, error } = await supabase.rpc("accept_aircraft_invite", {
+        p_token: token,
+      });
 
-      if (userErr) throw userErr;
-      if (!user) throw new Error("Not logged in.");
+      if (error) throw error;
 
-      if (!invite) throw new Error("Invite not loaded.");
-
-      // 1) add to aircraft_members
-      const { error: memErr } = await supabase.from("aircraft_members").insert([
-        {
-          aircraft_id: invite.aircraft_id,
-          user_id: user.id,
-          role: invite.role,
-        },
-      ]);
-
-      if (memErr) throw memErr;
-
-      // 2) mark invite accepted
-      const { error: updErr } = await supabase
-        .from("aircraft_invites")
-        .update({
-          status: "accepted",
-          accepted_by: user.id,
-          accepted_at: new Date().toISOString(),
-        })
-        .eq("id", invite.id);
-
-      if (updErr) throw updErr;
-
-      // 3) send them to the aircraft (THIS must match your app route)
-      router.replace(`/app/aircraft/${invite.aircraft_id}`);
+      const aircraftId = data as string;
+      router.replace(`/aircraft/${aircraftId}`);
     } catch (e: any) {
       setError(e?.message ?? "Accept failed");
     } finally {
@@ -108,21 +53,19 @@ if (!sessionData.session) {
     <main style={{ padding: 24, maxWidth: 700 }}>
       <h1>Accept Invite ✈️</h1>
 
-      {loading && <p>Loading invite…</p>}
+      {loading && <p>Loading…</p>}
 
       {!loading && error && (
         <div style={{ color: "tomato" }}>
           <p>{error}</p>
-          <p>
-            <Link href="/login">Go to login</Link>
-          </p>
+          <p><Link href="/login">Go to login</Link></p>
         </div>
       )}
 
-      {!loading && invite && !error && (
+      {!loading && !error && (
         <div style={{ marginTop: 16 }}>
           <p style={{ opacity: 0.85 }}>
-            You’ve been invited to join an aircraft as <b>{invite.role}</b>.
+            Click below to accept this invite.
           </p>
 
           <button
