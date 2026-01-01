@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -118,6 +118,8 @@ export default function AppDashboardPage() {
     };
   }, [userId]);
 
+  // ✅ FIX: load aircraft via membership for normal users,
+  // and load ALL aircraft for admins
   async function loadAircraft() {
     setLoading(true);
     setError(null);
@@ -128,26 +130,40 @@ export default function AppDashboardPage() {
       return;
     }
 
-    let query = supabase
-      .from("aircraft")
-      .select("*")
-      .order("created_at", { ascending: false });
+    try {
+      if (isAdmin) {
+        // Admin sees all aircraft
+        const { data, error } = await supabase
+          .from("aircraft")
+          .select("*")
+          .order("created_at", { ascending: false });
 
-    // Admin sees all aircraft, normal users see only theirs
-    if (!isAdmin) {
-      query = query.eq("user_id", userId);
-    }
+        if (error) throw error;
+        setAircraft((data as Aircraft[]) ?? []);
+      } else {
+        // Normal users see aircraft through membership
+        const { data, error } = await supabase
+          .from("aircraft_members")
+          .select(
+            "aircraft:aircraft_id(id, user_id, tail_number, make, model, year, created_at)"
+          )
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false, referencedTable: "aircraft" });
 
-    const { data, error } = await query;
+        if (error) throw error;
 
-    if (error) {
-      setError(error.message);
+        const rows = (data ?? [])
+          .map((r: any) => r.aircraft)
+          .filter(Boolean) as Aircraft[];
+
+        setAircraft(rows);
+      }
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load aircraft.");
       setAircraft([]);
-    } else {
-      setAircraft((data as Aircraft[]) ?? []);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   useEffect(() => {
@@ -163,6 +179,7 @@ export default function AppDashboardPage() {
     router.replace("/login");
   }
 
+  // ✅ FIX: when creating aircraft, also create membership row for owner
   async function addAircraft(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -187,30 +204,47 @@ export default function AppDashboardPage() {
       return;
     }
 
-    const payload = {
-      user_id: userId,
-      tail_number: tailNumber.trim() || null,
-      make: make.trim() || null,
-      model: model.trim() || null,
-      year: parsedYear,
-    };
+    try {
+      // 1) Create aircraft
+      const payload = {
+        user_id: userId, // keep legacy owner id
+        tail_number: tailNumber.trim() || null,
+        make: make.trim() || null,
+        model: model.trim() || null,
+        year: parsedYear,
+      };
 
-    const { error } = await supabase.from("aircraft").insert([payload]);
+      const { data: created, error: insErr } = await supabase
+        .from("aircraft")
+        .insert([payload])
+        .select("id")
+        .single();
 
-    if (error) {
-      setError(error.message);
+      if (insErr) throw insErr;
+
+      // 2) Create membership row (owner access)
+      const { error: memErr } = await supabase.from("aircraft_members").insert([
+        {
+          aircraft_id: created.id,
+          user_id: userId,
+          role: "owner",
+        },
+      ]);
+
+      if (memErr) throw memErr;
+
+      setTailNumber("");
+      setMake("");
+      setModel("");
+      setYear("");
+      setShowForm(false);
+
+      await loadAircraft();
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to add aircraft");
+    } finally {
       setSaving(false);
-      return;
     }
-
-    setTailNumber("");
-    setMake("");
-    setModel("");
-    setYear("");
-    setShowForm(false);
-
-    await loadAircraft();
-    setSaving(false);
   }
 
   if (authLoading) {
@@ -310,7 +344,6 @@ export default function AppDashboardPage() {
         <p>No aircraft yet. Click “Add Aircraft”.</p>
       )}
 
-      {/* ✅ Card layout (boxed) */}
       <ul style={{ display: "grid", gap: 10, padding: 0, listStyle: "none" }}>
         {aircraft.map((a) => (
           <li
