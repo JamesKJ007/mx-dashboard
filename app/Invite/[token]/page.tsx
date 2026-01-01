@@ -86,7 +86,7 @@ export default function InviteAcceptPage() {
       if (updErr) throw updErr;
 
       // 3) send them to the aircraft
-      router.replace(`/app/aircraft/${invite.aircraft_id}`);
+router.replace(`/aircraft/${invite.aircraft_id}`);
     } catch (e: any) {
       setError(e?.message ?? "Accept failed");
     } finally {
