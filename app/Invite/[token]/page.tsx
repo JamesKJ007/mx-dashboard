@@ -33,8 +33,11 @@ export default function InviteAcceptPage() {
           .from("aircraft_invites")
           .select("*")
           .eq("token", token)
-          .single();
+.maybeSingle();
 
+if (!inv) {
+  throw new Error("Invite not found or already used.");
+}
         if (invErr) throw invErr;
         if (!inv) throw new Error("Invite not found.");
 
