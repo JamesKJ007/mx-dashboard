@@ -19,40 +19,43 @@ export default function InviteAcceptPage() {
     (async () => {
       try {
         setError(null);
+        setInvite(null);
         setLoading(true);
 
-        // must be logged in to accept
-        const { data } = await supabase.auth.getSession();
-      if (!data.session) {
-  // send them to login, then come right back here
-  router.replace(`/login?next=/invite/${token}`);
-  return;
-}
+        // Must be logged in to accept — preserve token via ?next=
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData.session) {
+          router.replace(`/login?next=/invite/${token}`);
+          return;
+        }
 
         const { data: inv, error: invErr } = await supabase
           .from("aircraft_invites")
           .select("*")
           .eq("token", token)
-.maybeSingle();
+          .maybeSingle();
 
-if (!inv) {
-  throw new Error("Invite not found or already used.");
-}
+        // Always handle Supabase error first
         if (invErr) throw invErr;
-        if (!inv) throw new Error("Invite not found.");
+
+        if (!inv) {
+          setError("Invite not found or already used.");
+          return;
+        }
 
         if (inv.status !== "pending") {
           setError("This invite has already been used or is no longer valid.");
-        } else {
-          setInvite(inv);
+          return;
         }
+
+        setInvite(inv);
       } catch (e: any) {
         setError(e?.message ?? "Failed to load invite.");
       } finally {
         setLoading(false);
       }
     })();
-  }, [token]);
+  }, [token, router]);
 
   async function acceptInvite() {
     setBusy(true);
@@ -61,9 +64,13 @@ if (!inv) {
     try {
       const {
         data: { user },
+        error: userErr,
       } = await supabase.auth.getUser();
 
+      if (userErr) throw userErr;
       if (!user) throw new Error("Not logged in.");
+
+      if (!invite) throw new Error("Invite not loaded.");
 
       // 1) add to aircraft_members
       const { error: memErr } = await supabase.from("aircraft_members").insert([
@@ -88,8 +95,8 @@ if (!inv) {
 
       if (updErr) throw updErr;
 
-      // 3) send them to the aircraft
-router.replace(`/aircraft/${invite.aircraft_id}`);
+      // 3) send them to the aircraft (THIS must match your app route)
+      router.replace(`/app/aircraft/${invite.aircraft_id}`);
     } catch (e: any) {
       setError(e?.message ?? "Accept failed");
     } finally {
