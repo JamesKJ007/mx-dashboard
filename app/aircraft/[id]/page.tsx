@@ -66,6 +66,12 @@ export default function AircraftMaintenancePage() {
   // ---- Benchmark
   const [benchmark, setBenchmark] = useState<BenchmarkRow | null>(null);
 
+  // ✅ Role (owner/member/admin) for invite permissions + page guard
+  const [myRole, setMyRole] = useState<"owner" | "member" | "admin" | null>(
+    null
+  );
+  const [roleLoading, setRoleLoading] = useState(true);
+
   // ---- Add Form
   const [entryDate, setEntryDate] = useState("");
   const [category, setCategory] = useState("Maintenance");
@@ -240,19 +246,21 @@ export default function AircraftMaintenancePage() {
   }, []);
 
   // ---- Protect page (redirect if not logged in)
-useEffect(() => {
-  if (authLoading) return;
-  if (!userId) router.replace("/login");
-}, [authLoading, userId, router]);
+  useEffect(() => {
+    if (authLoading) return;
+    if (!userId) router.replace("/login");
+  }, [authLoading, userId, router]);
 
-  // ---- Load aircraft + entries + benchmark
+  // ---- Load aircraft + role + entries + benchmark
   async function loadAll() {
     if (!aircraftId) return;
+    if (!userId) return;
 
     setLoading(true);
     setError("");
 
     try {
+      // Aircraft
       const { data: aircraftData, error: aircraftErr } = await supabase
         .from("aircraft")
         .select("id, user_id, tail_number, make, model, year, created_at")
@@ -260,9 +268,55 @@ useEffect(() => {
         .maybeSingle();
 
       if (aircraftErr) throw aircraftErr;
+
       setAircraft(aircraftData ?? null);
 
-      // ✅ READ from view
+      if (!aircraftData) {
+        setError("Aircraft not found.");
+        setEntries([]);
+        setRoleLoading(false);
+        return;
+      }
+
+      // Role
+      setRoleLoading(true);
+
+      const { data: adminRow, error: adminErr } = await supabase
+        .from("app_admins")
+        .select("user_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (adminErr) throw adminErr;
+
+      if (adminRow) {
+        setMyRole("admin");
+      } else {
+        const { data: memData, error: memErr } = await supabase
+          .from("aircraft_members")
+          .select("role")
+          .eq("aircraft_id", aircraftId)
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (memErr) throw memErr;
+
+        const memRow = (memData as any) as { role: "owner" | "member" } | null;
+
+        setMyRole(memRow?.role ?? null);
+
+        if (!memRow) {
+          setError("You don’t have access to this aircraft.");
+          setAircraft(null);
+          setEntries([]);
+          setRoleLoading(false);
+          return;
+        }
+      }
+
+      setRoleLoading(false);
+
+      // Entries (READ view)
       const { data: entryData, error: entryErr } = await supabase
         .from(ENTRIES_READ)
         .select(
@@ -275,6 +329,7 @@ useEffect(() => {
       if (entryErr) throw entryErr;
       setEntries(entryData ?? []);
 
+      // Benchmark
       const { data: benchData, error: benchErr } = await supabase
         .from("maintenance_benchmarks")
         .select("id, aircraft_type, hourly_cost, annual_cost, effective_date")
@@ -287,15 +342,19 @@ useEffect(() => {
       setBenchmark(benchData ?? null);
     } catch (e: any) {
       setError(e?.message ?? "Unknown error");
+      setRoleLoading(false);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!userId) return;
+    if (!aircraftId) return;
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aircraftId]);
+  }, [aircraftId, userId, authLoading]);
 
   // ---- Calculations (all-time)
   const totalSpend = useMemo(
@@ -378,10 +437,7 @@ useEffect(() => {
     }
 
     // Date is optional, but must be valid if provided
-    if (
-      entryDate.trim() !== "" &&
-      !/^\d{4}-\d{2}-\d{2}$/.test(entryDate.trim())
-    ) {
+    if (entryDate.trim() !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(entryDate.trim())) {
       setSaving(false);
       return setError("Date must be YYYY-MM-DD (or leave blank).");
     }
@@ -400,10 +456,7 @@ useEffect(() => {
       notes: notes.trim() === "" ? null : notes.trim(),
     };
 
-    // ✅ WRITE to table (not view)
-    const { error: insErr } = await supabase
-      .from(ENTRIES_WRITE)
-      .insert(payload);
+    const { error: insErr } = await supabase.from(ENTRIES_WRITE).insert(payload);
 
     if (insErr) {
       setSaving(false);
@@ -464,10 +517,7 @@ useEffect(() => {
       setSaving(false);
       return setError("Tach hours are required when entering a cost.");
     }
-    if (
-      editDate.trim() !== "" &&
-      !/^\d{4}-\d{2}-\d{2}$/.test(editDate.trim())
-    ) {
+    if (editDate.trim() !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(editDate.trim())) {
       setSaving(false);
       return setError("Date must be YYYY-MM-DD (or leave blank).");
     }
@@ -482,11 +532,7 @@ useEffect(() => {
       notes: editNotes.trim() === "" ? null : editNotes.trim(),
     };
 
-    // ✅ WRITE to table (not view)
-    const { error } = await supabase
-      .from(ENTRIES_WRITE)
-      .update(patch)
-      .eq("id", id);
+    const { error } = await supabase.from(ENTRIES_WRITE).update(patch).eq("id", id);
 
     if (error) {
       setSaving(false);
@@ -505,7 +551,6 @@ useEffect(() => {
     setError("");
     setSaving(true);
 
-    // ✅ WRITE to table (not view)
     const { error } = await supabase.from(ENTRIES_WRITE).delete().eq("id", id);
 
     if (error) {
@@ -559,8 +604,8 @@ useEffect(() => {
         }}
       >
         <button style={ghostButton} onClick={() => router.push("/app")}>
-  ← Back to Aircraft
-</button>
+          ← Back to Aircraft
+        </button>
 
         <h1 style={{ margin: 0 }}>Aircraft MX ✈️</h1>
 
@@ -568,11 +613,7 @@ useEffect(() => {
       </div>
 
       <div style={{ opacity: 0.9, marginBottom: 14 }}>
-        {authLoading
-          ? "Checking login…"
-          : userId
-          ? "Logged in ✅"
-          : "Not logged in ❌"}
+        {authLoading ? "Checking login…" : userId ? "Logged in ✅" : "Not logged in ❌"}
       </div>
 
       {!!error && (
@@ -606,29 +647,21 @@ useEffect(() => {
           </div>
         )}
       </div>
-      <InviteMemberBox aircraftId={String(aircraftId)} role="member" />
+
+      {!roleLoading && (myRole === "owner" || myRole === "admin") && (
+        <InviteMemberBox aircraftId={String(aircraftId)} role="member" />
+      )}
 
       {/* Summary Cards */}
-      <div
-        style={{
-          display: "flex",
-          gap: 12,
-          marginBottom: 12,
-          flexWrap: "wrap",
-        }}
-      >
+      <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
         <div style={{ ...cardDark, flex: 1, minWidth: 220 }}>
           <div style={smallMuted}>Total Spend</div>
-          <div style={{ fontSize: 22, fontWeight: 900 }}>
-            ${totalSpend.toFixed(2)}
-          </div>
+          <div style={{ fontSize: 22, fontWeight: 900 }}>${totalSpend.toFixed(2)}</div>
         </div>
 
         <div style={{ ...cardDark, flex: 1, minWidth: 220 }}>
           <div style={smallMuted}>Hours Logged</div>
-          <div style={{ fontSize: 22, fontWeight: 900 }}>
-            {hoursFlown.toFixed(1)}
-          </div>
+          <div style={{ fontSize: 22, fontWeight: 900 }}>{hoursFlown.toFixed(1)}</div>
         </div>
 
         <div style={{ ...cardDark, flex: 1, minWidth: 220 }}>
@@ -653,20 +686,10 @@ useEffect(() => {
           <div style={{ marginTop: 8 }}>
             <div style={{ fontSize: 16, fontWeight: 800 }}>
               Avg: ${benchmark.hourly_cost.toFixed(2)} / hr{" "}
-              {benchmark.annual_cost != null
-                ? ` • $${benchmark.annual_cost.toFixed(0)} / yr`
-                : ""}
+              {benchmark.annual_cost != null ? ` • $${benchmark.annual_cost.toFixed(0)} / yr` : ""}
             </div>
 
-            <div
-              style={{
-                marginTop: 8,
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                flexWrap: "wrap",
-              }}
-            >
+            <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               {benchmarkCompare ? (
                 <>
                   {benchmarkStatus && (
@@ -690,16 +713,12 @@ useEffect(() => {
                       <>You’re basically right on average ✅</>
                     ) : benchmarkCompare.above ? (
                       <>
-                        You’re{" "}
-                        <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b>{" "}
-                        above the industry estimate (≈ $
+                        You’re <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b> above the industry estimate (≈ $
                         {benchmarkCompare.diff.toFixed(2)} / hr) 📈
                       </>
                     ) : (
                       <>
-                        You’re{" "}
-                        <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b>{" "}
-                        below the industry estimate (≈ $
+                        You’re <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b> below the industry estimate (≈ $
                         {Math.abs(benchmarkCompare.diff).toFixed(2)} / hr) 📉
                       </>
                     )}
@@ -707,15 +726,12 @@ useEffect(() => {
                 </>
               ) : (
                 <span style={{ opacity: 0.85 }}>
-                  Add more entries with Amount + Tach (at least 2 different tach
-                  values) to compare.
+                  Add more entries with Amount + Tach (at least 2 different tach values) to compare.
                 </span>
               )}
             </div>
 
-            <div style={{ marginTop: 6, ...smallMuted }}>
-              Effective: {benchmark.effective_date}
-            </div>
+            <div style={{ marginTop: 6, ...smallMuted }}>Effective: {benchmark.effective_date}</div>
           </div>
         )}
       </div>
@@ -737,57 +753,28 @@ useEffect(() => {
 
       {/* Entries section */}
       <div style={cardLight}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 10,
-            marginBottom: 12,
-          }}
-        >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
           <h2 style={{ margin: 0 }}>Entries</h2>
 
-          <button
-            style={buttonStyle}
-            type="button"
-            onClick={() => setShowAddEntry((v) => !v)}
-          >
+          <button style={buttonStyle} type="button" onClick={() => setShowAddEntry((v) => !v)}>
             {showAddEntry ? "Close" : "+ Add Entry"}
           </button>
         </div>
 
         {showAddEntry && (
           <div style={{ ...cardDark, marginBottom: 14 }}>
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
-              Add Maintenance Entry
-            </h3>
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>Add Maintenance Entry</h3>
 
             <form onSubmit={addEntry}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                  gap: 10,
-                }}
-              >
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                 <label style={{ display: "grid", gap: 6 }}>
                   <span style={smallMuted}>Date (optional)</span>
-                  <input
-                    style={inputStyle}
-                    type="date"
-                    value={entryDate}
-                    onChange={(e) => setEntryDate(e.target.value)}
-                  />
+                  <input style={inputStyle} type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} />
                 </label>
 
                 <label style={{ display: "grid", gap: 6 }}>
                   <span style={smallMuted}>Category</span>
-                  <select
-                    style={inputStyle}
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                  >
+                  <select style={inputStyle} value={category} onChange={(e) => setCategory(e.target.value)}>
                     {ALLOWED_CATEGORIES.map((c) => (
                       <option key={c} value={c} style={{ color: "black" }}>
                         {c}
@@ -829,11 +816,7 @@ useEffect(() => {
                 </label>
               </div>
 
-              <button
-                type="submit"
-                style={{ ...buttonStyle, marginTop: 12 }}
-                disabled={saving}
-              >
+              <button type="submit" style={{ ...buttonStyle, marginTop: 12 }} disabled={saving}>
                 {saving ? "Saving…" : "Save Entry"}
               </button>
             </form>
@@ -846,16 +829,9 @@ useEffect(() => {
           <div style={{ opacity: 0.7 }}>No entries yet.</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table
-              style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}
-            >
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
               <thead>
-                <tr
-                  style={{
-                    textAlign: "left",
-                    borderBottom: "1px solid rgba(255,255,255,0.10)",
-                  }}
-                >
+                <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.10)" }}>
                   <th style={{ padding: "8px 10px" }}>Date</th>
                   <th style={{ padding: "8px 10px" }}>Category</th>
                   <th style={{ padding: "8px 10px" }}>Amount</th>
@@ -893,12 +869,7 @@ useEffect(() => {
                       const isEditing = editingId === r.id;
 
                       return (
-                        <tr
-                          key={r.id}
-                          style={{
-                            borderBottom: "1px solid rgba(255,255,255,0.06)",
-                          }}
-                        >
+                        <tr key={r.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                           <td style={{ padding: "8px 10px", width: 160 }}>
                             {isEditing ? (
                               <input
@@ -917,16 +888,10 @@ useEffect(() => {
                               <select
                                 style={{ ...inputStyle, width: "100%" }}
                                 value={editCategory}
-                                onChange={(e) =>
-                                  setEditCategory(e.target.value)
-                                }
+                                onChange={(e) => setEditCategory(e.target.value)}
                               >
                                 {ALLOWED_CATEGORIES.map((c) => (
-                                  <option
-                                    key={c}
-                                    value={c}
-                                    style={{ color: "black" }}
-                                  >
+                                  <option key={c} value={c} style={{ color: "black" }}>
                                     {c}
                                   </option>
                                 ))}
@@ -983,19 +948,12 @@ useEffect(() => {
 
                           <td style={{ padding: "8px 10px" }}>
                             {!isEditing ? (
-                              <div
-                                style={menuWrap}
-                                onClick={(e) => e.stopPropagation()}
-                              >
+                              <div style={menuWrap} onClick={(e) => e.stopPropagation()}>
                                 <button
                                   type="button"
                                   style={iconButton}
                                   aria-label="Row actions"
-                                  onClick={() =>
-                                    setOpenMenuId((cur) =>
-                                      cur === r.id ? null : r.id
-                                    )
-                                  }
+                                  onClick={() => setOpenMenuId((cur) => (cur === r.id ? null : r.id))}
                                   disabled={saving}
                                 >
                                   ⋮
@@ -1003,19 +961,12 @@ useEffect(() => {
 
                                 {openMenuId === r.id && (
                                   <div style={menuPanel}>
-                                    <button
-                                      type="button"
-                                      style={menuItem}
-                                      onClick={() => startEdit(r)}
-                                    >
+                                    <button type="button" style={menuItem} onClick={() => startEdit(r)}>
                                       Edit
                                     </button>
                                     <button
                                       type="button"
-                                      style={{
-                                        ...menuItem,
-                                        color: "#fecaca",
-                                      }}
+                                      style={{ ...menuItem, color: "#fecaca" }}
                                       onClick={() => deleteEntry(r.id)}
                                     >
                                       Delete
@@ -1025,20 +976,10 @@ useEffect(() => {
                               </div>
                             ) : (
                               <div style={{ display: "flex", gap: 8 }}>
-                                <button
-                                  type="button"
-                                  style={buttonStyle}
-                                  disabled={saving}
-                                  onClick={() => saveEdit(r.id)}
-                                >
+                                <button type="button" style={buttonStyle} disabled={saving} onClick={() => saveEdit(r.id)}>
                                   Save
                                 </button>
-                                <button
-                                  type="button"
-                                  style={ghostButton}
-                                  disabled={saving}
-                                  onClick={cancelEdit}
-                                >
+                                <button type="button" style={ghostButton} disabled={saving} onClick={cancelEdit}>
                                   Cancel
                                 </button>
                               </div>
@@ -1055,8 +996,7 @@ useEffect(() => {
         )}
 
         <div style={{ marginTop: 10, ...smallMuted }}>
-          ✅ Edits/deletes work because writes go to{" "}
-          <code>{ENTRIES_WRITE}</code> (not the view).
+          ✅ Edits/deletes work because writes go to <code>{ENTRIES_WRITE}</code> (not the view).
         </div>
       </div>
     </div>

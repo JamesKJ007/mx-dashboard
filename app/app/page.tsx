@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -13,6 +13,8 @@ type Aircraft = {
   model: string | null;
   year: number | null;
   created_at?: string;
+  // ✅ add role so UI + permissions can reflect membership
+  role: "owner" | "member" | "admin";
 };
 
 export default function AppDashboardPage() {
@@ -135,26 +137,46 @@ export default function AppDashboardPage() {
         // Admin sees all aircraft
         const { data, error } = await supabase
           .from("aircraft")
-          .select("*")
+          .select("id, user_id, tail_number, make, model, year, created_at")
           .order("created_at", { ascending: false });
 
         if (error) throw error;
-        setAircraft((data as Aircraft[]) ?? []);
+
+        const rows =
+          (data ?? []).map((a: any) => ({
+            ...a,
+            role: "admin" as const,
+          })) as Aircraft[];
+
+        setAircraft(rows);
       } else {
-        // Normal users see aircraft through membership
+        // Normal users see aircraft through membership (+ their role)
         const { data, error } = await supabase
           .from("aircraft_members")
           .select(
-            "aircraft:aircraft_id(id, user_id, tail_number, make, model, year, created_at)"
+            "role, aircraft:aircraft_id(id, user_id, tail_number, make, model, year, created_at)"
           )
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false, referencedTable: "aircraft" });
+          .eq("user_id", userId);
 
         if (error) throw error;
 
         const rows = (data ?? [])
-          .map((r: any) => r.aircraft)
+          .map((r: any) =>
+            r.aircraft
+              ? ({
+                  ...r.aircraft,
+                  role: r.role ?? "member",
+                } as Aircraft)
+              : null
+          )
           .filter(Boolean) as Aircraft[];
+
+        // sort newest first (client-side, safe)
+        rows.sort((a, b) => {
+          const da = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const db = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return db - da;
+        });
 
         setAircraft(rows);
       }
@@ -359,9 +381,17 @@ export default function AppDashboardPage() {
                 <strong style={{ fontSize: 16 }}>
                   {a.tail_number ?? "Untitled Aircraft"}
                 </strong>
+
                 <div style={{ opacity: 0.8, marginTop: 4 }}>
                   {(a.make ?? "") + " " + (a.model ?? "")}{" "}
                   {a.year ? `(${a.year})` : ""}
+                </div>
+
+                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+                  Role:{" "}
+                  <span style={{ textTransform: "uppercase", fontWeight: 700 }}>
+                    {a.role}
+                  </span>
                 </div>
               </div>
 
