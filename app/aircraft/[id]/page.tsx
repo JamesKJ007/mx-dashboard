@@ -38,6 +38,332 @@ type BenchmarkRow = {
   effective_date: string; // YYYY-MM-DD
 };
 
+type MemberRow = {
+  user_id: string;
+  role: "owner" | "member";
+  created_at?: string;
+  // Optional profile fields if you have a profiles table
+  profiles?: {
+    full_name?: string | null;
+    email?: string | null;
+  } | null;
+};
+
+function MembersPanel({
+  aircraftId,
+  myRole,
+}: {
+  aircraftId: string;
+  myRole: "owner" | "member" | "admin" | null;
+}) {
+  const canEdit = myRole === "owner" || myRole === "admin";
+
+  const [members, setMembers] = useState<MemberRow[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [err, setErr] = useState<string>("");
+
+  // Modal state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState("");
+  const [confirmBody, setConfirmBody] = useState("");
+  const [confirmAction, setConfirmAction] = useState<null | (() => Promise<void>)>(null);
+
+  async function loadMembers() {
+    if (!aircraftId) return;
+    setErr("");
+    setLoadingMembers(true);
+
+    /**
+     * If you have a public.profiles table with id = user_id, you can join:
+     * .select("user_id, role, created_at, profiles(full_name,email)")
+     *
+     * If you DON'T have profiles, just use:
+     * .select("user_id, role, created_at")
+     */
+    const { data, error } = await supabase
+      .from("aircraft_members")
+      .select("user_id, role, created_at, profiles(full_name,email)")
+      .eq("aircraft_id", aircraftId)
+      .order("role", { ascending: true }) // owner first if you want: sort later below
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      setErr(error.message);
+      setMembers([]);
+    } else {
+      const rows = (data as any as MemberRow[]) ?? [];
+      // Ensure owner appears first
+      rows.sort((a, b) => (a.role === "owner" ? -1 : 1) - (b.role === "owner" ? -1 : 1));
+      setMembers(rows);
+    }
+
+    setLoadingMembers(false);
+  }
+
+  useEffect(() => {
+    loadMembers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aircraftId]);
+
+  function openConfirm(opts: {
+    title: string;
+    body: string;
+    action: () => Promise<void>;
+  }) {
+    setConfirmTitle(opts.title);
+    setConfirmBody(opts.body);
+    setConfirmAction(() => opts.action);
+    setConfirmOpen(true);
+  }
+
+  async function doMakeOwner(userIdToPromote: string) {
+    setErr("");
+    setActionLoading(true);
+
+    const { error } = await supabase.rpc("transfer_aircraft_ownership", {
+      p_aircraft_id: aircraftId,
+      p_new_owner_user_id: userIdToPromote,
+    });
+
+    if (error) {
+      setErr(error.message);
+      setActionLoading(false);
+      return;
+    }
+
+    // ✅ refresh list
+    await loadMembers();
+
+    // OPTIONAL: later, call an edge function to email everyone
+    // await supabase.functions.invoke("notify-ownership-transfer", { body: { aircraftId, newOwner: userIdToPromote } });
+
+    setActionLoading(false);
+  }
+
+  async function doRemoveMember(userIdToRemove: string) {
+    setErr("");
+    setActionLoading(true);
+
+    // Guard: don’t allow removing the owner (force transfer first)
+    const target = members.find((m) => m.user_id === userIdToRemove);
+    if (target?.role === "owner") {
+      setErr("You can’t remove the owner. Transfer ownership first.");
+      setActionLoading(false);
+      return;
+    }
+
+    const { error } = await supabase
+      .from("aircraft_members")
+      .delete()
+      .eq("aircraft_id", aircraftId)
+      .eq("user_id", userIdToRemove);
+
+    if (error) {
+      setErr(error.message);
+      setActionLoading(false);
+      return;
+    }
+
+    await loadMembers();
+    setActionLoading(false);
+  }
+
+  const card: React.CSSProperties = {
+    padding: 14,
+    borderRadius: 12,
+    background: "#0f172a",
+    border: "1px solid rgba(255,255,255,0.08)",
+    marginBottom: 14,
+  };
+
+  const smallMuted: React.CSSProperties = { opacity: 0.75, fontSize: 12 };
+  const btn: React.CSSProperties = {
+    padding: "8px 10px",
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.15)",
+    background: "rgba(255,255,255,0.10)",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: 800,
+  };
+  const dangerBtn: React.CSSProperties = { ...btn, color: "#fecaca" };
+  const ghostBtn: React.CSSProperties = { ...btn, background: "transparent" };
+
+  return (
+    <div style={card}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+        <div>
+          <div style={smallMuted}>Aircraft Members</div>
+          <div style={{ fontSize: 16, fontWeight: 900 }}>
+            {myRole ? `You are: ${myRole}` : "Role: —"}
+          </div>
+        </div>
+
+        <button style={ghostBtn} onClick={loadMembers} disabled={loadingMembers || actionLoading}>
+          {loadingMembers ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+
+      {!!err && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 12,
+            borderRadius: 12,
+            background: "rgba(239, 68, 68, 0.14)",
+            border: "1px solid rgba(239, 68, 68, 0.25)",
+            color: "#fecaca",
+          }}
+        >
+          Error: {err}
+        </div>
+      )}
+
+      <div style={{ marginTop: 12 }}>
+        {loadingMembers ? (
+          <div style={{ opacity: 0.8 }}>Loading members…</div>
+        ) : members.length === 0 ? (
+          <div style={{ opacity: 0.8 }}>No members yet.</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+              <thead>
+                <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.10)" }}>
+                  <th style={{ padding: "8px 10px" }}>User</th>
+                  <th style={{ padding: "8px 10px" }}>Role</th>
+                  <th style={{ padding: "8px 10px", width: 280 }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {members.map((m) => {
+                  const name =
+                    m.profiles?.full_name ||
+                    m.profiles?.email ||
+                    `${m.user_id.slice(0, 8)}…`;
+
+                  return (
+                    <tr key={m.user_id} style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                      <td style={{ padding: "8px 10px" }}>
+                        <div style={{ fontWeight: 900 }}>{name}</div>
+                        <div style={{ opacity: 0.7, fontSize: 12 }}>{m.user_id}</div>
+                      </td>
+
+                      <td style={{ padding: "8px 10px", fontWeight: 900 }}>
+                        {m.role === "owner" ? "Owner 👑" : "Member"}
+                      </td>
+
+                      <td style={{ padding: "8px 10px" }}>
+                        {!canEdit ? (
+                          <span style={{ opacity: 0.7 }}>View only</span>
+                        ) : (
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            {m.role !== "owner" && (
+                              <button
+                                style={btn}
+                                disabled={actionLoading}
+                                onClick={() =>
+                                  openConfirm({
+                                    title: "Transfer ownership?",
+                                    body:
+                                      "This will transfer ownership to this member and demote the current owner to a member. This aircraft will still have ONLY ONE owner.",
+                                    action: async () => {
+                                      setConfirmOpen(false);
+                                      await doMakeOwner(m.user_id);
+                                    },
+                                  })
+                                }
+                              >
+                                Make Owner
+                              </button>
+                            )}
+
+                            {m.role !== "owner" && (
+                              <button
+                                style={dangerBtn}
+                                disabled={actionLoading}
+                                onClick={() =>
+                                  openConfirm({
+                                    title: "Remove member?",
+                                    body:
+                                      "This will remove the member from this aircraft. They will lose access immediately.",
+                                    action: async () => {
+                                      setConfirmOpen(false);
+                                      await doRemoveMember(m.user_id);
+                                    },
+                                  })
+                                }
+                              >
+                                Remove
+                              </button>
+                            )}
+
+                            {m.role === "owner" && <span style={{ opacity: 0.7 }}>Owner cannot be removed</span>}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Confirmation modal */}
+      {confirmOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+            padding: 16,
+          }}
+          onClick={() => setConfirmOpen(false)}
+        >
+          <div
+            style={{
+              width: "min(560px, 100%)",
+              background: "#0b1226",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 14,
+              padding: 16,
+              boxShadow: "0 18px 40px rgba(0,0,0,0.45)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 18, fontWeight: 900 }}>{confirmTitle}</div>
+            <div style={{ marginTop: 10, opacity: 0.85, lineHeight: 1.35 }}>
+              {confirmBody}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
+              <button style={ghostBtn} onClick={() => setConfirmOpen(false)} disabled={actionLoading}>
+                Cancel
+              </button>
+              <button
+                style={btn}
+                disabled={actionLoading}
+                onClick={async () => {
+                  if (!confirmAction) return;
+                  await confirmAction();
+                }}
+              >
+                {actionLoading ? "Working…" : "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // READ from the view (timeline/ordering/analytics)
 const ENTRIES_READ = "maintenance_entries_timeline";
 // WRITE to the real table (insert/update/delete must hit a table, not a view)
@@ -648,9 +974,12 @@ export default function AircraftMaintenancePage() {
         )}
       </div>
 
-      {!roleLoading && (myRole === "owner" || myRole === "admin") && (
-        <InviteMemberBox aircraftId={String(aircraftId)} role="member" />
-      )}
+     {!roleLoading && (myRole === "owner" || myRole === "admin") && (
+  <>
+    <InviteMemberBox aircraftId={String(aircraftId)} role="member" />
+    <MembersPanel aircraftId={String(aircraftId)} myRole={myRole} />
+  </>
+)}
 
       {/* Summary Cards */}
       <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
