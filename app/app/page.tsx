@@ -244,17 +244,6 @@ export default function AppDashboardPage() {
 
       if (insErr) throw insErr;
 
-      // 2) Create membership row (owner access)
-      const { error: memErr } = await supabase.from("aircraft_members").insert([
-        {
-          aircraft_id: created.id,
-          user_id: userId,
-          role: "owner",
-        },
-      ]);
-
-      if (memErr) throw memErr;
-
       setTailNumber("");
       setMake("");
       setModel("");
