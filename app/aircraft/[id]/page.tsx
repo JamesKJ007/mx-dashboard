@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabaseClient";
 import MonthlyCostChart from "../../components/MonthlyCostChart";
 import CostPerHourTrendChart from "../../components/CostPerHourTrendChart";
 import InviteMemberBox from "../../components/InviteMemberBox";
+import RentalRevenuePanel from "@/app/components/RentalRevenuePanel";
 
 type AircraftRow = {
   id: string;
@@ -974,10 +975,13 @@ export default function AircraftMaintenancePage() {
         )}
       </div>
 
-     {!roleLoading && (myRole === "owner" || myRole === "admin") && (
+   {!roleLoading && (myRole === "owner" || myRole === "admin") && (
   <>
     <InviteMemberBox aircraftId={String(aircraftId)} role="member" />
+
     <MembersPanel aircraftId={String(aircraftId)} myRole={myRole} />
+
+    <RentalRevenuePanel aircraftId={String(aircraftId)} myRole={myRole} />
   </>
 )}
 
