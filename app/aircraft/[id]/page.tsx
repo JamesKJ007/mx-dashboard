@@ -6,8 +6,8 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import MonthlyCostChart from "../../components/MonthlyCostChart";
 import CostPerHourTrendChart from "../../components/CostPerHourTrendChart";
-import InviteMemberBox from "../../components/InviteMemberBox";
 import RentalRevenuePanel from "@/app/components/RentalRevenuePanel";
+import InviteMemberBox from "../../components/InviteMemberBox";
 
 type AircraftRow = {
   id: string;
@@ -95,7 +95,7 @@ function MembersPanel({
     } else {
       const rows = (data as any as MemberRow[]) ?? [];
       // Ensure owner appears first
-      rows.sort((a, b) => (a.role === "owner" ? -1 : 1) - (b.role === "owner" ? -1 : 1));
+     rows.sort((a, b) => (a.role === "owner" ? -1 : 1) - (b.role === "owner" ? -1 : 1));
       setMembers(rows);
     }
 
@@ -369,6 +369,125 @@ function MembersPanel({
 const ENTRIES_READ = "maintenance_entries_timeline";
 // WRITE to the real table (insert/update/delete must hit a table, not a view)
 const ENTRIES_WRITE = "maintenance_entries";
+
+function SharingPanel({
+  aircraftId,
+  myRole,
+}: {
+  aircraftId: string;
+  myRole: "owner" | "member" | "admin" | null;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  const card: React.CSSProperties = {
+    padding: 14,
+    borderRadius: 12,
+    background: "#0f172a",
+    border: "1px solid rgba(255,255,255,0.08)",
+    marginBottom: 14,
+  };
+
+  const buttonStyle: React.CSSProperties = {
+    border: "1px solid rgba(255,255,255,0.18)",
+    background: "rgba(255,255,255,0.06)",
+    color: "#e5e7eb",
+    borderRadius: 10,
+    padding: "8px 12px",
+    fontWeight: 800,
+    cursor: "pointer",
+  };
+
+  const canManage = myRole === "owner" || myRole === "admin";
+
+  return (
+    <div style={card}>
+      {/* Header row */}
+      <div
+        onClick={() => setCollapsed((v) => !v)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          cursor: "pointer",
+          userSelect: "none",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span
+            style={{
+              transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
+              transition: "transform 0.2s ease",
+              color: "#e5e7eb",
+              fontSize: 14,
+              lineHeight: 1,
+            }}
+          >
+            ▼
+          </span>
+
+          <div>
+            <div style={{ color: "#e5e7eb", fontWeight: 900, fontSize: 16 }}>
+              Sharing & Members
+            </div>
+            <div style={{ color: "#9ca3af", fontSize: 13 }}>
+              Invite people and manage who can access this aircraft.
+            </div>
+          </div>
+        </div>
+
+        {/* Small status pill */}
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 900,
+            padding: "6px 10px",
+            borderRadius: 999,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "rgba(255,255,255,0.06)",
+            color: "#e5e7eb",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {myRole ? `You are: ${myRole}` : "Role: —"}
+        </div>
+      </div>
+
+      {/* Body */}
+      {collapsed ? null : (
+        <div style={{ marginTop: 12 }}>
+          {!canManage ? (
+            <div style={{ color: "#9ca3af", fontWeight: 700 }}>
+              You can view members, but only the Owner/Admin can invite or manage access.
+            </div>
+          ) : (
+            <div style={{ marginBottom: 12 }}>
+              {/* Keep your existing InviteMemberBox exactly as-is */}
+              <InviteMemberBox aircraftId={String(aircraftId)} role="member" />
+            </div>
+          )}
+
+          {/* Keep your existing MembersPanel exactly as-is */}
+          <MembersPanel aircraftId={String(aircraftId)} myRole={myRole} />
+
+          {/* Optional: quick collapse button at bottom */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+            <button
+              type="button"
+              style={buttonStyle}
+              onClick={(e) => {
+                e.stopPropagation();
+                setCollapsed(true);
+              }}
+            >
+              Collapse
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AircraftMaintenancePage() {
   const params = useParams();
@@ -974,13 +1093,9 @@ export default function AircraftMaintenancePage() {
           </div>
         )}
       </div>
-
    {!roleLoading && (myRole === "owner" || myRole === "admin") && (
   <>
-    <InviteMemberBox aircraftId={String(aircraftId)} role="member" />
-
-    <MembersPanel aircraftId={String(aircraftId)} myRole={myRole} />
-
+    <SharingPanel aircraftId={String(aircraftId)} myRole={myRole} />
     <RentalRevenuePanel aircraftId={String(aircraftId)} />
   </>
 )}
