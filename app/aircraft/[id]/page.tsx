@@ -981,7 +981,7 @@ export default function AircraftMaintenancePage() {
 
     <MembersPanel aircraftId={String(aircraftId)} myRole={myRole} />
 
-    <RentalRevenuePanel aircraftId={String(aircraftId)} myRole={myRole} />
+    <RentalRevenuePanel aircraftId={String(aircraftId)} />
   </>
 )}
 

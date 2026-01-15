@@ -55,7 +55,15 @@ function lastOfMonth(year: number, month0: number) {
   return new Date(year, month0 + 1, 0);
 }
 
-export default function RentalIncomePanel({ aircraftId }: { aircraftId: string }) {
+type MyRole = "owner" | "admin" | "member";
+
+export default function RentalRevenuePanel({
+  aircraftId,
+  myRole,
+}: {
+  aircraftId: string;
+  myRole?: MyRole;
+}) {
   const now = new Date();
   const [view, setView] = useState<ViewMode>("year");
   const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear());
