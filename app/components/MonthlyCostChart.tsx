@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   Chart as ChartJS,
   ArcElement,
@@ -18,45 +18,19 @@ type Entry = {
   entry_date: string | null; // "YYYY-MM-DD"
 };
 
-type ViewMode = "all" | "year" | "month";
-
-// ✅ Parse YYYY-MM-DD as LOCAL time (prevents date shifting / missing entries)
-function parseLocalDate(iso: string) {
-  return new Date(`${iso}T00:00:00`);
-}
-
 export default function MonthlyCostChart({ entries }: { entries: Entry[] }) {
-  const [view, setView] = useState<ViewMode>("all");
-
-  const filtered = useMemo(() => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth(); // 0-11
-
-    return entries.filter((e) => {
-      if (!e.entry_date) return false;
-
-      const d = parseLocalDate(e.entry_date);
-      if (Number.isNaN(d.getTime())) return false;
-
-      if (view === "month") {
-        return d.getFullYear() === year && d.getMonth() === month;
-      }
-      if (view === "year") {
-        return d.getFullYear() === year;
-      }
-      return true;
-    });
-  }, [entries, view]);
+  // ✅ IMPORTANT:
+  // This component now assumes entries are ALREADY filtered by the page (monthlySpendEntries).
+  // So no internal "View" state, no dropdown, no extra spacing fights.
 
   const totalsByCategory = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const e of filtered) {
+    for (const e of entries) {
       const cat = e.category ?? "Other";
       map[cat] = (map[cat] ?? 0) + (e.amount ?? 0);
     }
     return map;
-  }, [filtered]);
+  }, [entries]);
 
   const labels = Object.keys(totalsByCategory);
   const values = Object.values(totalsByCategory);
@@ -75,11 +49,8 @@ export default function MonthlyCostChart({ entries }: { entries: Entry[] }) {
   const topValue = topIndex >= 0 ? values[topIndex] : 0;
   const topPercent = total > 0 ? (topValue / total) * 100 : 0;
 
-  const entryCount = filtered.length;
+  const entryCount = entries.length;
   const avgPerEntry = entryCount > 0 ? total / entryCount : 0;
-
-  const viewLabel =
-    view === "month" ? "This Month" : view === "year" ? "This Year" : "All Time";
 
   const colors = [
     "#22c55e", // green
@@ -103,13 +74,18 @@ export default function MonthlyCostChart({ entries }: { entries: Entry[] }) {
     ],
   };
 
+  // ✅ Key fixes:
+  // - maintainAspectRatio:false lets the chart fill the parent height instead of creating "air"
+  // - we control height via a wrapper div
+  // - reduce legend padding so it doesn’t push content down
   const options: ChartOptions<"doughnut"> = {
     responsive: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: {
         position: "bottom" as const,
         labels: {
-          padding: 16,
+          padding: 10,
           font: {
             size: 12,
             weight: 500,
@@ -135,7 +111,6 @@ export default function MonthlyCostChart({ entries }: { entries: Entry[] }) {
                 lineWidth: 0,
                 hidden: !chart.getDataVisibility(i),
                 index: i,
-                // ✅ keeps legend text readable
                 fontColor: "#e5e7eb",
               };
             });
@@ -158,35 +133,16 @@ export default function MonthlyCostChart({ entries }: { entries: Entry[] }) {
 
   return (
     <div>
-      {/* View selector */}
-      <div style={{ marginBottom: 10 }}>
-        <label style={{ marginRight: 8, opacity: 0.8, color: "#e5e7eb" }}>
-          View
-        </label>
-        <select
-          value={view}
-          onChange={(e) => setView(e.target.value as ViewMode)}
-          style={{
-            background: "#020617",
-            color: "white",
-            border: "1px solid rgba(255,255,255,0.2)",
-            borderRadius: 8,
-            padding: "4px 10px",
-          }}
-        >
-          <option value="all">All Time</option>
-          <option value="year">This Year</option>
-          <option value="month">This Month</option>
-        </select>
-      </div>
-
       {total <= 0 ? (
         <div style={{ color: "#e5e7eb", opacity: 0.8 }}>
           No data for this view yet.
         </div>
       ) : (
         <>
-          <Doughnut data={data} options={options} />
+          {/* ✅ This wrapper controls donut height and removes the weird bottom air */}
+          <div style={{ height: 240, position: "relative" }}>
+            <Doughnut data={data} options={options} />
+          </div>
 
           {/* Summary Row */}
           <div
@@ -207,7 +163,7 @@ export default function MonthlyCostChart({ entries }: { entries: Entry[] }) {
               }}
             >
               <div style={{ fontSize: 12, opacity: 0.75, color: "#e5e7eb" }}>
-                Total ({viewLabel})
+                Total
               </div>
               <div
                 style={{

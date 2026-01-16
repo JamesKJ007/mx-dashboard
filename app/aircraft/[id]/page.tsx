@@ -8,6 +8,7 @@ import MonthlyCostChart from "../../components/MonthlyCostChart";
 import CostPerHourTrendChart from "../../components/CostPerHourTrendChart";
 import RentalRevenuePanel from "@/app/components/RentalRevenuePanel";
 import InviteMemberBox from "../../components/InviteMemberBox";
+import Section from "../../components/Section";
 
 type AircraftRow = {
   id: string;
@@ -508,6 +509,51 @@ export default function AircraftMaintenancePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>("");
+  // ===== Monthly Spend selector (matches Rental Income selector style) =====
+const [spendView, setSpendView] = useState<"all" | "year" | "month">("all");
+const [spendYear, setSpendYear] = useState<number>(new Date().getFullYear());
+const [spendMonth, setSpendMonth] = useState<number>(new Date().getMonth()); // 0-11
+
+// Years present in entries (safer: read year from string)
+const spendYears = useMemo(() => {
+  const ys = new Set<number>();
+  (entries ?? []).forEach((e: any) => {
+    const iso = e?.entry_date;
+    if (typeof iso !== "string" || iso.length < 4) return;
+    const y = Number(iso.slice(0, 4));
+    if (Number.isFinite(y)) ys.add(y);
+  });
+  return Array.from(ys).sort((a, b) => b - a);
+}, [entries]);
+
+// Keep selected year valid if entries change
+useEffect(() => {
+  if (spendYears.length && !spendYears.includes(spendYear)) {
+    setSpendYear(spendYears[0]);
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [spendYears.join(",")]);
+
+const monthLabels = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+// Filter entries for MonthlyCostChart based on selector
+const monthlySpendEntries = useMemo(() => {
+  const list = entries ?? [];
+  if (spendView === "all") return list;
+
+  return list.filter((e: any) => {
+    if (!e?.entry_date) return false;
+    const d = new Date(e.entry_date);
+    if (isNaN(d.getTime())) return false;
+
+    if (spendView === "year") {
+      return d.getFullYear() === spendYear;
+    }
+
+    // month view
+    return d.getFullYear() === spendYear && d.getMonth() === spendMonth;
+  });
+}, [entries, spendView, spendYear, spendMonth]);
 
   // ---- Benchmark
   const [benchmark, setBenchmark] = useState<BenchmarkRow | null>(null);
@@ -565,6 +611,40 @@ export default function AircraftMaintenancePage() {
     background: "#0f172a",
     border: "1px solid rgba(255,255,255,0.08)",
   };
+
+  const chartGrid: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 12,
+  marginBottom: 12,
+};
+
+  const pillRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  flexWrap: "wrap",
+};
+
+const pillSelect: React.CSSProperties = {
+  appearance: "none",
+  WebkitAppearance: "none",
+  MozAppearance: "none",
+  padding: "8px 12px",
+  borderRadius: 999,
+  border: "1px solid rgba(255,255,255,0.15)",
+  background: "rgba(255,255,255,0.10)",
+  color: "white",
+  fontWeight: 800,
+  cursor: "pointer",
+  lineHeight: 1,
+};
+
+const pillLabel: React.CSSProperties = {
+  opacity: 0.9,
+  fontWeight: 800,
+  fontSize: 12,
+};
 
   const cardLight: CSSProperties = {
     padding: 14,
@@ -1078,25 +1158,32 @@ export default function AircraftMaintenancePage() {
       )}
 
       {/* Aircraft Card */}
-      <div style={{ ...cardDark, marginBottom: 14 }}>
-        <div style={smallMuted}>Aircraft</div>
-        {loading ? (
-          <div>Loading…</div>
-        ) : aircraft ? (
-          <div style={{ fontSize: 18, fontWeight: 800 }}>
-            {aircraft.tail_number ?? "Untitled"}
-            {aircraft.model ? ` — ${aircraft.model}` : ""}
-          </div>
-        ) : (
-          <div style={{ fontSize: 14, opacity: 0.9 }}>
-            Couldn’t find aircraft for id: <code>{String(aircraftId)}</code>
-          </div>
-        )}
-      </div>
-   {!roleLoading && (myRole === "owner" || myRole === "admin") && (
+    <Section
+  title="Aircraft"
+  subtitle="Your aircraft details and access status."
+  right={
+    <span style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>
+      {authLoading ? "Checking…" : userId ? "Logged in ✅" : "Not logged in ❌"}
+    </span>
+  }
+>
+  {loading ? (
+    <div>Loading…</div>
+  ) : aircraft ? (
+    <div style={{ fontSize: 18, fontWeight: 800 }}>
+      {aircraft.tail_number ?? "Untitled"}
+      {aircraft.model ? ` — ${aircraft.model}` : ""}
+    </div>
+  ) : (
+    <div style={{ fontSize: 14, opacity: 0.9 }}>
+      Couldn’t find aircraft for id: <code>{String(aircraftId)}</code>
+    </div>
+  )}
+</Section>
+   {!roleLoading && (myRole === "owner" || myRole === "admin") && aircraft && (
   <>
     <SharingPanel aircraftId={String(aircraftId)} myRole={myRole} />
-    <RentalRevenuePanel aircraftId={String(aircraftId)} />
+    <RentalRevenuePanel aircraftId={aircraft.id} myRole={myRole} />
   </>
 )}
 
@@ -1184,20 +1271,92 @@ export default function AircraftMaintenancePage() {
         )}
       </div>
 
-      {/* Charts */}
-      <div style={{ ...cardDark, marginBottom: 18 }}>
-        <div style={smallMuted}>Monthly Spend</div>
-        <div style={{ marginTop: 10 }}>
-          <MonthlyCostChart entries={entries} />
-        </div>
+{/* Charts */}
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1.35fr 0.65fr",
+    gap: 12,
+    marginBottom: 12,
+  }}
+>
+  {/* LEFT (bigger): Cost / Hour Trend */}
+  <div style={{ minWidth: 0 }}>
+    <Section
+      title="Cost / Hour Trend"
+      subtitle="How your cost-per-hour evolves over time."
+    >
+      <div style={{ height: 340 }}>
+        <CostPerHourTrendChart entries={entries} />
       </div>
+    </Section>
+  </div>
 
-      <div style={{ ...cardDark, marginBottom: 18 }}>
-        <div style={smallMuted}>Cost / Hour Trend</div>
-        <div style={{ marginTop: 10 }}>
-          <CostPerHourTrendChart entries={entries} />
+  {/* RIGHT (smaller): Monthly Spend */}
+  <div style={{ minWidth: 0 }}>
+    <Section
+      title="Monthly Spend"
+      subtitle="Monthly totals across your entries."
+      right={
+        <div style={pillRow}>
+          <span style={pillLabel}>View</span>
+
+          <select
+            value={spendView}
+            onChange={(e) => setSpendView(e.target.value as any)}
+            style={pillSelect}
+          >
+      
+            <option value="all">All Time</option>
+            <option value="year">Year</option>
+<option value="month">Month</option>
+          </select>
+
+          {spendView !== "all" && (
+            <select
+              value={spendYear}
+              onChange={(e) => setSpendYear(Number(e.target.value))}
+              style={pillSelect}
+            >
+              {(spendYears.length ? spendYears : [new Date().getFullYear()]).map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {spendView === "month" && (
+            <select
+              value={spendMonth}
+              onChange={(e) => setSpendMonth(Number(e.target.value))}
+              style={pillSelect}
+            >
+              {monthLabels.map((m, idx) => (
+                <option key={m} value={idx}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
-      </div>
+      }
+    >
+     <div style={{ minWidth: 0 }}>
+  <MonthlyCostChart entries={monthlySpendEntries} />
+</div>
+    </Section>
+  </div>
+</div>
+
+{/* Mobile/Small screen fallback */}
+<style jsx>{`
+  @media (max-width: 900px) {
+    div[style*="grid-template-columns: 1.35fr 0.65fr"] {
+      grid-template-columns: 1fr !important;
+    }
+  }
+`}</style>
 
       {/* Entries section */}
       <div style={cardLight}>

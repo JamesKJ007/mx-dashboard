@@ -28,6 +28,7 @@ type MaintenanceEntry = {
 };
 
 type ViewMode = "month" | "year" | "all";
+type MyRole = "owner" | "admin" | "member";
 
 function money(n: number | null | undefined) {
   const v = Number(n ?? 0);
@@ -55,8 +56,6 @@ function lastOfMonth(year: number, month0: number) {
   return new Date(year, month0 + 1, 0);
 }
 
-type MyRole = "owner" | "admin" | "member";
-
 export default function RentalRevenuePanel({
   aircraftId,
   myRole,
@@ -65,6 +64,7 @@ export default function RentalRevenuePanel({
   myRole?: MyRole;
 }) {
   const now = new Date();
+
   const [view, setView] = useState<ViewMode>("year");
   const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear());
   const [selectedMonth0, setSelectedMonth0] = useState<number>(now.getMonth());
@@ -87,8 +87,21 @@ export default function RentalRevenuePanel({
   const [logHours, setLogHours] = useState<string>("");
   const [logNote, setLogNote] = useState<string>("");
 
-  // ✅ Collapsible panel state
+  // Collapsible
   const [collapsed, setCollapsed] = useState(false);
+
+  // Permissions
+  const canEditLogs = myRole === "owner" || myRole === "admin";
+
+  // Inline edit state (rental logs)
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
+  const [editLogDate, setEditLogDate] = useState<string>("");
+  const [editLogHours, setEditLogHours] = useState<string>("");
+  const [editLogRate, setEditLogRate] = useState<string>("");
+  const [editLogNote, setEditLogNote] = useState<string>("");
+
+  const [logMenuId, setLogMenuId] = useState<string | null>(null);
+  const [savingLog, setSavingLog] = useState(false);
 
   // Load data
   useEffect(() => {
@@ -142,6 +155,26 @@ export default function RentalRevenuePanel({
       alive = false;
     };
   }, [aircraftId]);
+
+  async function reloadLogs() {
+    const { data, error: e } = await supabase
+      .from("aircraft_rental_logs")
+      .select("id, aircraft_id, rental_date, hours, hourly_rate, note, created_by")
+      .eq("aircraft_id", aircraftId)
+      .order("rental_date", { ascending: true });
+
+    if (!e) setLogs((data ?? []) as RentalLog[]);
+  }
+
+  async function reloadRates() {
+    const { data, error: e } = await supabase
+      .from("aircraft_rental_rates")
+      .select("id, aircraft_id, hourly_rate, effective_from")
+      .eq("aircraft_id", aircraftId)
+      .order("effective_from", { ascending: true });
+
+    if (!e) setRates((data ?? []) as RentalRate[]);
+  }
 
   // Current hourly rate
   const currentRate = useMemo(() => {
@@ -248,8 +281,103 @@ export default function RentalRevenuePanel({
     return { width, height, padX, padY, innerW, innerH, points, linePath, areaPath, maxRevenue };
   }, [yearSeries]);
 
+  // Year options (use your original 8-year window)
+  const years = useMemo(() => {
+    const y0 = now.getFullYear();
+    return Array.from({ length: 8 }).map((_, i) => y0 - 5 + i);
+  }, [now]);
+
+  const monthOptions = useMemo(() => Array.from({ length: 12 }).map((_, i) => i), []);
+
+  // ---------- Actions ----------
+  function startEditLog(l: RentalLog) {
+    setLogMenuId(null);
+    setEditingLogId(l.id);
+    setEditLogDate(l.rental_date ?? ymd(new Date()));
+    setEditLogHours(String(l.hours ?? ""));
+    setEditLogRate(String(l.hourly_rate ?? ""));
+    setEditLogNote(l.note ?? "");
+  }
+
+  function cancelEditLog() {
+    setEditingLogId(null);
+    setEditLogDate("");
+    setEditLogHours("");
+    setEditLogRate("");
+    setEditLogNote("");
+  }
+
+  async function saveEditLog(id: string) {
+    if (!canEditLogs) return;
+
+    setErr(null);
+    setSavingLog(true);
+
+    const hrs = Number(editLogHours);
+    const rateNum = Number(editLogRate);
+
+    if (!editLogDate) {
+      setErr("Rental date is required.");
+      setSavingLog(false);
+      return;
+    }
+    if (!hrs || hrs <= 0) {
+      setErr("Hours must be a positive number.");
+      setSavingLog(false);
+      return;
+    }
+    if (!rateNum || rateNum <= 0) {
+      setErr("Hourly rate must be a positive number.");
+      setSavingLog(false);
+      return;
+    }
+
+    const { error } = await supabase
+      .from("aircraft_rental_logs")
+      .update({
+        rental_date: editLogDate,
+        hours: hrs,
+        hourly_rate: rateNum,
+        note: editLogNote || null,
+      })
+      .eq("id", id);
+
+    if (error) {
+      setErr(error.message);
+      setSavingLog(false);
+      return;
+    }
+
+    await reloadLogs();
+    setSavingLog(false);
+    cancelEditLog();
+  }
+
+  async function deleteLog(id: string) {
+    if (!canEditLogs) return;
+
+    setLogMenuId(null);
+    if (!confirm("Delete this rental log?")) return;
+
+    setErr(null);
+    setSavingLog(true);
+
+    const { error } = await supabase.from("aircraft_rental_logs").delete().eq("id", id);
+
+    if (error) {
+      setErr(error.message);
+      setSavingLog(false);
+      return;
+    }
+
+    await reloadLogs();
+    setSavingLog(false);
+    if (editingLogId === id) cancelEditLog();
+  }
+
   async function saveRate() {
     setErr(null);
+
     const rateNum = Number(rateValue);
     if (!rateNum || rateNum <= 0) {
       setErr("Hourly rate must be a positive number.");
@@ -273,14 +401,7 @@ export default function RentalRevenuePanel({
 
     setShowRateModal(false);
     setRateValue("");
-
-    const { data, error: e } = await supabase
-      .from("aircraft_rental_rates")
-      .select("id, aircraft_id, hourly_rate, effective_from")
-      .eq("aircraft_id", aircraftId)
-      .order("effective_from", { ascending: true });
-
-    if (!e) setRates((data ?? []) as RentalRate[]);
+    await reloadRates();
   }
 
   async function saveLog() {
@@ -318,28 +439,26 @@ export default function RentalRevenuePanel({
     setShowLogModal(false);
     setLogHours("");
     setLogNote("");
-
-    const { data, error: e } = await supabase
-      .from("aircraft_rental_logs")
-      .select("id, aircraft_id, rental_date, hours, hourly_rate, note, created_by")
-      .eq("aircraft_id", aircraftId)
-      .order("rental_date", { ascending: true });
-
-    if (!e) setLogs((data ?? []) as RentalLog[]);
+    await reloadLogs();
   }
 
-  const years = useMemo(() => {
-    const y0 = now.getFullYear();
-    return Array.from({ length: 8 }).map((_, i) => y0 - 5 + i);
-  }, [now]);
-
-  const monthOptions = useMemo(() => Array.from({ length: 12 }).map((_, i) => i), []);
-
+  // ---------- Styles ----------
   const cardStyle: React.CSSProperties = {
     padding: 12,
     borderRadius: 12,
     background: "rgba(255,255,255,0.06)",
     border: "1px solid rgba(255,255,255,0.10)",
+  };
+
+  // “table input” style: smaller so it fits inside table cells nicely
+  const tableInputStyle: React.CSSProperties = {
+    width: "100%",
+    background: "rgba(2,6,23,0.85)",
+    color: "#e5e7eb",
+    border: "1px solid rgba(255,255,255,0.14)",
+    borderRadius: 10,
+    padding: "8px 10px",
+    outline: "none",
   };
 
   const inputStyle: React.CSSProperties = {
@@ -362,6 +481,46 @@ export default function RentalRevenuePanel({
     cursor: "pointer",
   };
 
+  const iconBtn: React.CSSProperties = {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.15)",
+    background: "rgba(255,255,255,0.08)",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: 900,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  };
+
+  const menuWrap: React.CSSProperties = { position: "relative", display: "inline-block" };
+
+  const menuPanel: React.CSSProperties = {
+    position: "absolute",
+    right: 0,
+    top: 40,
+    minWidth: 140,
+    borderRadius: 12,
+    background: "#0b1226",
+    border: "1px solid rgba(255,255,255,0.12)",
+    boxShadow: "0 12px 28px rgba(0,0,0,0.35)",
+    zIndex: 50,
+    overflow: "hidden",
+  };
+
+  const menuItem: React.CSSProperties = {
+    width: "100%",
+    padding: "10px 12px",
+    background: "transparent",
+    border: "none",
+    color: "white",
+    textAlign: "left",
+    cursor: "pointer",
+    fontWeight: 700,
+  };
+
   if (loading) {
     return <div style={{ color: "#e5e7eb", opacity: 0.85 }}>Loading rental income…</div>;
   }
@@ -369,8 +528,16 @@ export default function RentalRevenuePanel({
   return (
     <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 16, padding: 14 }}>
       {/* Header row */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        {/* ✅ Clickable title area toggles collapse */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        {/* Clickable title toggles collapse */}
         <div
           onClick={() => setCollapsed((v) => !v)}
           style={{
@@ -399,7 +566,6 @@ export default function RentalRevenuePanel({
           </div>
         </div>
 
-        {/* ✅ When collapsed, hide controls */}
         {!collapsed && (
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <div style={{ color: "#9ca3af", fontSize: 13 }}>View</div>
@@ -418,7 +584,7 @@ export default function RentalRevenuePanel({
               }}
             >
               <option value="month">Month</option>
-              <option value="year">This Year</option>
+              <option value="year">Year</option>
               <option value="all">All Time</option>
             </select>
 
@@ -498,7 +664,6 @@ export default function RentalRevenuePanel({
         )}
       </div>
 
-      {/* ✅ If collapsed, stop rendering the body */}
       {collapsed ? null : (
         <>
           {/* Error */}
@@ -518,8 +683,16 @@ export default function RentalRevenuePanel({
             </div>
           )}
 
-          {/* Top cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginTop: 12 }}>
+          {/* Summary */}
+          <div
+            className="rental-summary-grid"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+              gap: 10,
+              marginTop: 12,
+            }}
+          >
             <div style={cardStyle}>
               <div style={{ color: "#9ca3af", fontSize: 12 }}>Current Hourly Rate</div>
               <div style={{ color: "#e5e7eb", fontSize: 20, fontWeight: 900, marginTop: 4 }}>
@@ -537,7 +710,13 @@ export default function RentalRevenuePanel({
             </div>
 
             <div style={cardStyle}>
-              <div style={{ color: "#9ca3af", fontSize: 12 }}>Profit (Revenue - Spend)</div>
+              <div style={{ color: "#9ca3af", fontSize: 12 }}>Spend ({range.label})</div>
+              <div style={{ color: "#e5e7eb", fontSize: 20, fontWeight: 900, marginTop: 4 }}>{money(totals.spend)}</div>
+              <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 2 }}>Maintenance entries: {maintenanceInRange.length}</div>
+            </div>
+
+            <div style={cardStyle}>
+              <div style={{ color: "#9ca3af", fontSize: 12 }}>Profit</div>
               <div style={{ color: "#e5e7eb", fontSize: 20, fontWeight: 900, marginTop: 4 }}>{money(totals.profit)}</div>
               <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 2 }}>
                 Profit / Hr {totals.profitPerHr == null ? "—" : money(totals.profitPerHr)}
@@ -545,31 +724,13 @@ export default function RentalRevenuePanel({
             </div>
           </div>
 
-          {/* Small stat row */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10, marginTop: 10 }}>
-            <div style={cardStyle}>
-              <div style={{ color: "#9ca3af", fontSize: 12 }}>Revenue</div>
-              <div style={{ color: "#e5e7eb", fontWeight: 900, marginTop: 4 }}>{money(totals.revenue)}</div>
-            </div>
-            <div style={cardStyle}>
-              <div style={{ color: "#9ca3af", fontSize: 12 }}>Hours</div>
-              <div style={{ color: "#e5e7eb", fontWeight: 900, marginTop: 4 }}>{totals.hours.toFixed(1)}</div>
-            </div>
-            <div style={cardStyle}>
-              <div style={{ color: "#9ca3af", fontSize: 12 }}>Spend</div>
-              <div style={{ color: "#e5e7eb", fontWeight: 900, marginTop: 4 }}>{money(totals.spend)}</div>
-            </div>
-            <div style={cardStyle}>
-              <div style={{ color: "#9ca3af", fontSize: 12 }}>Profit</div>
-              <div style={{ color: "#e5e7eb", fontWeight: 900, marginTop: 4 }}>{money(totals.profit)}</div>
-            </div>
-            <div style={cardStyle}>
-              <div style={{ color: "#9ca3af", fontSize: 12 }}>Profit / Hr</div>
-              <div style={{ color: "#e5e7eb", fontWeight: 900, marginTop: 4 }}>
-                {totals.profitPerHr == null ? "—" : money(totals.profitPerHr)}
-              </div>
-            </div>
-          </div>
+          <style jsx>{`
+            @media (max-width: 900px) {
+              .rental-summary-grid {
+                grid-template-columns: 1fr !important;
+              }
+            }
+          `}</style>
 
           {/* Chart */}
           <div style={{ marginTop: 14 }}>
@@ -606,14 +767,7 @@ export default function RentalRevenuePanel({
                 />
 
                 <path d={chart.areaPath} fill="url(#revFill)" />
-                <path
-                  d={chart.linePath}
-                  fill="none"
-                  stroke="#3b82f6"
-                  strokeWidth={3}
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                />
+                <path d={chart.linePath} fill="none" stroke="#3b82f6" strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />
 
                 {chart.points.map((p) => {
                   const r = p.r;
@@ -665,21 +819,129 @@ export default function RentalRevenuePanel({
                       <th style={{ textAlign: "left", padding: 10, color: "#e5e7eb" }}>Rate</th>
                       <th style={{ textAlign: "left", padding: 10, color: "#e5e7eb" }}>Income</th>
                       <th style={{ textAlign: "left", padding: 10, color: "#e5e7eb" }}>Note</th>
+                      <th style={{ textAlign: "left", padding: 10, color: "#e5e7eb", width: 120 }}>Actions</th>
                     </tr>
                   </thead>
+
                   <tbody>
                     {logsInRange
                       .slice()
                       .sort((a, b) => b.rental_date.localeCompare(a.rental_date))
                       .map((l) => {
+                        const isEditing = editingLogId === l.id;
                         const income = (Number(l.hours) || 0) * (Number(l.hourly_rate) || 0);
+                        const editIncome = (Number(editLogHours) || 0) * (Number(editLogRate) || 0);
+
                         return (
                           <tr key={l.id} style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                            <td style={{ padding: 10, color: "#e5e7eb" }}>{l.rental_date}</td>
-                            <td style={{ padding: 10, color: "#e5e7eb" }}>{Number(l.hours).toFixed(1)}</td>
-                            <td style={{ padding: 10, color: "#e5e7eb" }}>{money(l.hourly_rate)}</td>
-                            <td style={{ padding: 10, color: "#e5e7eb" }}>{money(income)}</td>
-                            <td style={{ padding: 10, color: "#9ca3af" }}>{l.note ?? "—"}</td>
+                            {/* Date */}
+                            <td style={{ padding: 10, color: "#e5e7eb", width: 150 }}>
+                              {isEditing ? (
+                                <input
+                                  type="date"
+                                  value={editLogDate}
+                                  onChange={(e) => setEditLogDate(e.target.value)}
+                                  style={tableInputStyle}
+                                />
+                              ) : (
+                                l.rental_date
+                              )}
+                            </td>
+
+                            {/* Hours */}
+                            <td style={{ padding: 10, color: "#e5e7eb", width: 110 }}>
+                              {isEditing ? (
+                                <input
+                                  value={editLogHours}
+                                  onChange={(e) => setEditLogHours(e.target.value)}
+                                  placeholder="e.g. 2.5"
+                                  style={tableInputStyle}
+                                />
+                              ) : (
+                                Number(l.hours).toFixed(1)
+                              )}
+                            </td>
+
+                            {/* Rate */}
+                            <td style={{ padding: 10, color: "#e5e7eb", width: 120 }}>
+                              {isEditing ? (
+                                <input
+                                  value={editLogRate}
+                                  onChange={(e) => setEditLogRate(e.target.value)}
+                                  placeholder="e.g. 180"
+                                  style={tableInputStyle}
+                                />
+                              ) : (
+                                money(l.hourly_rate)
+                              )}
+                            </td>
+
+                            {/* Income */}
+                            <td style={{ padding: 10, color: "#e5e7eb", width: 140 }}>
+                              {isEditing ? money(editIncome) : money(income)}
+                            </td>
+
+                            {/* Note */}
+                            <td style={{ padding: 10, color: isEditing ? "#e5e7eb" : "#9ca3af" }}>
+                              {isEditing ? (
+                                <input
+                                  value={editLogNote}
+                                  onChange={(e) => setEditLogNote(e.target.value)}
+                                  placeholder="optional"
+                                  style={tableInputStyle}
+                                />
+                              ) : (
+                                l.note ?? "—"
+                              )}
+                            </td>
+
+                            {/* Actions */}
+                            <td style={{ padding: 10, width: 120 }}>
+                              {!canEditLogs ? (
+                                <span style={{ opacity: 0.6 }}>—</span>
+                              ) : isEditing ? (
+                                <div style={{ display: "flex", gap: 8 }}>
+                                  <button
+                                    style={buttonStyle}
+                                    disabled={savingLog}
+                                    onClick={() => saveEditLog(l.id)}
+                                    type="button"
+                                  >
+                                    {savingLog ? "Saving…" : "Save"}
+                                  </button>
+                                  <button style={buttonStyle} disabled={savingLog} onClick={cancelEditLog} type="button">
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <div style={menuWrap} onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    style={iconBtn}
+                                    onClick={() => setLogMenuId((cur) => (cur === l.id ? null : l.id))}
+                                    disabled={savingLog}
+                                    aria-label="Row actions"
+                                  >
+                                    ⋮
+                                  </button>
+
+                                  {logMenuId === l.id && (
+                                    <div style={menuPanel}>
+                                      <button type="button" style={menuItem} onClick={() => startEditLog(l)}>
+                                        Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        style={{ ...menuItem, color: "#fecaca" }}
+                                        onClick={() => deleteLog(l.id)}
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </td>
                           </tr>
                         );
                       })}
@@ -721,22 +983,12 @@ export default function RentalRevenuePanel({
 
                 <div style={{ marginTop: 14 }}>
                   <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 6 }}>Hourly Rate (USD)</div>
-                  <input
-                    value={rateValue}
-                    onChange={(e) => setRateValue(e.target.value)}
-                    placeholder="e.g. 180"
-                    style={inputStyle}
-                  />
+                  <input value={rateValue} onChange={(e) => setRateValue(e.target.value)} placeholder="e.g. 180" style={inputStyle} />
                 </div>
 
                 <div style={{ marginTop: 12 }}>
                   <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 6 }}>Effective From</div>
-                  <input
-                    type="date"
-                    value={rateEffective}
-                    onChange={(e) => setRateEffective(e.target.value)}
-                    style={inputStyle}
-                  />
+                  <input type="date" value={rateEffective} onChange={(e) => setRateEffective(e.target.value)} style={inputStyle} />
                 </div>
 
                 <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 10 }}>
@@ -799,22 +1051,12 @@ export default function RentalRevenuePanel({
 
                 <div style={{ marginTop: 12 }}>
                   <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 6 }}>Hours</div>
-                  <input
-                    value={logHours}
-                    onChange={(e) => setLogHours(e.target.value)}
-                    placeholder="e.g. 2.5"
-                    style={inputStyle}
-                  />
+                  <input value={logHours} onChange={(e) => setLogHours(e.target.value)} placeholder="e.g. 2.5" style={inputStyle} />
                 </div>
 
                 <div style={{ marginTop: 12 }}>
                   <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 6 }}>Note (optional)</div>
-                  <input
-                    value={logNote}
-                    onChange={(e) => setLogNote(e.target.value)}
-                    placeholder="optional"
-                    style={inputStyle}
-                  />
+                  <input value={logNote} onChange={(e) => setLogNote(e.target.value)} placeholder="optional" style={inputStyle} />
                 </div>
 
                 <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end", gap: 10 }}>
