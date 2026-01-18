@@ -9,6 +9,8 @@ import CostPerHourTrendChart from "../../components/CostPerHourTrendChart";
 import RentalRevenuePanel from "@/app/components/RentalRevenuePanel";
 import InviteMemberBox from "../../components/InviteMemberBox";
 import Section from "../../components/Section";
+import OperatingExpensesPanel from "@/app/components/OperatingExpensesPanel";
+import AllInCostPanel from "@/app/components/AllInCostPanel";
 
 type AircraftRow = {
   id: string;
@@ -1180,10 +1182,17 @@ const pillLabel: React.CSSProperties = {
     </div>
   )}
 </Section>
-   {!roleLoading && (myRole === "owner" || myRole === "admin") && aircraft && (
+{!roleLoading && aircraft && (
   <>
-    <SharingPanel aircraftId={String(aircraftId)} myRole={myRole} />
-    <RentalRevenuePanel aircraftId={aircraft.id} myRole={myRole} />
+    {(myRole === "owner" || myRole === "admin") && (
+      <SharingPanel aircraftId={String(aircraftId)} myRole={myRole} />
+    )}
+
+    {/* Rental panel: members can view, only owner/admin can edit (your panel already gates edits) */}
+    <RentalRevenuePanel aircraftId={aircraft.id} myRole={myRole ?? undefined} />
+
+    {/* V2: Operating Expenses */}
+    <OperatingExpensesPanel aircraftId={aircraft.id} myRole={myRole} />
   </>
 )}
 
@@ -1270,6 +1279,13 @@ const pillLabel: React.CSSProperties = {
           </div>
         )}
       </div>
+
+      <AllInCostPanel
+  aircraftId={String(aircraftId)}
+  myRole={myRole}
+  maintenanceSpendAllTime={totalSpend}
+  hoursFlownAllTime={hoursFlown}
+/>
 
 {/* Charts */}
 <div

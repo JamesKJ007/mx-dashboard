@@ -69,6 +69,9 @@ export default function RentalRevenuePanel({
   const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear());
   const [selectedMonth0, setSelectedMonth0] = useState<number>(now.getMonth());
 
+  // ✅ Log modal: rate is per-entry, defaults to current/base rate, editable, allows 0
+  const [logRate, setLogRate] = useState<string>("");
+
   const [logs, setLogs] = useState<RentalLog[]>([]);
   const [rates, setRates] = useState<RentalRate[]>([]);
   const [maintenance, setMaintenance] = useState<MaintenanceEntry[]>([]);
@@ -187,6 +190,14 @@ export default function RentalRevenuePanel({
 
     return usable.length ? usable[usable.length - 1] : rates[rates.length - 1];
   }, [rates]);
+
+  // ✅ Seed Log modal hourly rate from current/base rate when modal opens (does not overwrite typing)
+  useEffect(() => {
+    if (!showLogModal) return;
+
+    const base = currentRate?.hourly_rate ?? 0;
+    setLogRate((cur) => (cur === "" ? String(base) : cur));
+  }, [showLogModal, currentRate]);
 
   // Range filtering
   const range = useMemo(() => {
@@ -417,9 +428,10 @@ export default function RentalRevenuePanel({
       return;
     }
 
-    const rate = currentRate?.hourly_rate ?? Number(rateValue) ?? 0;
-    if (!rate || rate <= 0) {
-      setErr("Set an hourly rate first.");
+    // ✅ per-entry rate (editable), defaults from currentRate, allows 0
+    const rateNum = Number(logRate);
+    if (!Number.isFinite(rateNum) || rateNum < 0) {
+      setErr("Rate must be 0 or a positive number.");
       return;
     }
 
@@ -427,7 +439,7 @@ export default function RentalRevenuePanel({
       aircraft_id: aircraftId,
       rental_date: logDate,
       hours: hrs,
-      hourly_rate: rate,
+      hourly_rate: rateNum,
       note: logNote || null,
     });
 
@@ -439,6 +451,7 @@ export default function RentalRevenuePanel({
     setShowLogModal(false);
     setLogHours("");
     setLogNote("");
+    setLogRate(""); // ✅ so next open re-seeds from currentRate
     await reloadLogs();
   }
 
@@ -1052,6 +1065,24 @@ export default function RentalRevenuePanel({
                 <div style={{ marginTop: 12 }}>
                   <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 6 }}>Hours</div>
                   <input value={logHours} onChange={(e) => setLogHours(e.target.value)} placeholder="e.g. 2.5" style={inputStyle} />
+                </div>
+
+                {/* ✅ NEW: Rate per hour (defaults from Set Rate; editable; can be 0) */}
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 6 }}>Rate per Hour</div>
+                  <input
+                    value={logRate}
+                    onChange={(e) => setLogRate(e.target.value)}
+                    placeholder="e.g. 180 (can be 0 for fuel-only)"
+                    style={inputStyle}
+                    inputMode="decimal"
+                  />
+                  <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 6 }}>
+                    Defaults to your Set Rate. Total revenue:{" "}
+                    <span style={{ color: "#e5e7eb", fontWeight: 900 }}>
+                      {money((Number(logHours) || 0) * (Number(logRate) || 0))}
+                    </span>
+                  </div>
                 </div>
 
                 <div style={{ marginTop: 12 }}>
