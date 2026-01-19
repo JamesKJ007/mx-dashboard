@@ -12,6 +12,8 @@ import Section from "../../components/Section";
 import OperatingExpensesPanel from "@/app/components/OperatingExpensesPanel";
 import AllInCostPanel from "@/app/components/AllInCostPanel";
 
+type MyRole = "owner" | "member" | "admin";
+
 type AircraftRow = {
   id: string;
   user_id: string;
@@ -46,7 +48,6 @@ type MemberRow = {
   user_id: string;
   role: "owner" | "member";
   created_at?: string;
-  // Optional profile fields if you have a profiles table
   profiles?: {
     full_name?: string | null;
     email?: string | null;
@@ -58,7 +59,7 @@ function MembersPanel({
   myRole,
 }: {
   aircraftId: string;
-  myRole: "owner" | "member" | "admin" | null;
+  myRole: MyRole | null;
 }) {
   const canEdit = myRole === "owner" || myRole === "admin";
 
@@ -67,29 +68,23 @@ function MembersPanel({
   const [actionLoading, setActionLoading] = useState(false);
   const [err, setErr] = useState<string>("");
 
-  // Modal state
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTitle, setConfirmTitle] = useState("");
   const [confirmBody, setConfirmBody] = useState("");
-  const [confirmAction, setConfirmAction] = useState<null | (() => Promise<void>)>(null);
+  const [confirmAction, setConfirmAction] = useState<null | (() => Promise<void>)>(
+    null
+  );
 
   async function loadMembers() {
     if (!aircraftId) return;
     setErr("");
     setLoadingMembers(true);
 
-    /**
-     * If you have a public.profiles table with id = user_id, you can join:
-     * .select("user_id, role, created_at, profiles(full_name,email)")
-     *
-     * If you DON'T have profiles, just use:
-     * .select("user_id, role, created_at")
-     */
     const { data, error } = await supabase
       .from("aircraft_members")
       .select("user_id, role, created_at, profiles(full_name,email)")
       .eq("aircraft_id", aircraftId)
-      .order("role", { ascending: true }) // owner first if you want: sort later below
+      .order("role", { ascending: true })
       .order("created_at", { ascending: true });
 
     if (error) {
@@ -97,8 +92,9 @@ function MembersPanel({
       setMembers([]);
     } else {
       const rows = (data as any as MemberRow[]) ?? [];
-      // Ensure owner appears first
-     rows.sort((a, b) => (a.role === "owner" ? -1 : 1) - (b.role === "owner" ? -1 : 1));
+      rows.sort(
+        (a, b) => (a.role === "owner" ? -1 : 1) - (b.role === "owner" ? -1 : 1)
+      );
       setMembers(rows);
     }
 
@@ -136,12 +132,7 @@ function MembersPanel({
       return;
     }
 
-    // ✅ refresh list
     await loadMembers();
-
-    // OPTIONAL: later, call an edge function to email everyone
-    // await supabase.functions.invoke("notify-ownership-transfer", { body: { aircraftId, newOwner: userIdToPromote } });
-
     setActionLoading(false);
   }
 
@@ -149,7 +140,6 @@ function MembersPanel({
     setErr("");
     setActionLoading(true);
 
-    // Guard: don’t allow removing the owner (force transfer first)
     const target = members.find((m) => m.user_id === userIdToRemove);
     if (target?.role === "owner") {
       setErr("You can’t remove the owner. Transfer ownership first.");
@@ -173,7 +163,7 @@ function MembersPanel({
     setActionLoading(false);
   }
 
-  const card: React.CSSProperties = {
+  const card: CSSProperties = {
     padding: 14,
     borderRadius: 12,
     background: "#0f172a",
@@ -181,8 +171,8 @@ function MembersPanel({
     marginBottom: 14,
   };
 
-  const smallMuted: React.CSSProperties = { opacity: 0.75, fontSize: 12 };
-  const btn: React.CSSProperties = {
+  const smallMuted: CSSProperties = { opacity: 0.75, fontSize: 12 };
+  const btn: CSSProperties = {
     padding: "8px 10px",
     borderRadius: 10,
     border: "1px solid rgba(255,255,255,0.15)",
@@ -191,8 +181,8 @@ function MembersPanel({
     cursor: "pointer",
     fontWeight: 800,
   };
-  const dangerBtn: React.CSSProperties = { ...btn, color: "#fecaca" };
-  const ghostBtn: React.CSSProperties = { ...btn, background: "transparent" };
+  const dangerBtn: CSSProperties = { ...btn, color: "#fecaca" };
+  const ghostBtn: CSSProperties = { ...btn, background: "transparent" };
 
   return (
     <div style={card}>
@@ -241,10 +231,7 @@ function MembersPanel({
               </thead>
               <tbody>
                 {members.map((m) => {
-                  const name =
-                    m.profiles?.full_name ||
-                    m.profiles?.email ||
-                    `${m.user_id.slice(0, 8)}…`;
+                  const name = m.profiles?.full_name || m.profiles?.email || `${m.user_id.slice(0, 8)}…`;
 
                   return (
                     <tr key={m.user_id} style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
@@ -289,8 +276,7 @@ function MembersPanel({
                                 onClick={() =>
                                   openConfirm({
                                     title: "Remove member?",
-                                    body:
-                                      "This will remove the member from this aircraft. They will lose access immediately.",
+                                    body: "This will remove the member from this aircraft. They will lose access immediately.",
                                     action: async () => {
                                       setConfirmOpen(false);
                                       await doRemoveMember(m.user_id);
@@ -315,7 +301,6 @@ function MembersPanel({
         )}
       </div>
 
-      {/* Confirmation modal */}
       {confirmOpen && (
         <div
           style={{
@@ -342,9 +327,7 @@ function MembersPanel({
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ fontSize: 18, fontWeight: 900 }}>{confirmTitle}</div>
-            <div style={{ marginTop: 10, opacity: 0.85, lineHeight: 1.35 }}>
-              {confirmBody}
-            </div>
+            <div style={{ marginTop: 10, opacity: 0.85, lineHeight: 1.35 }}>{confirmBody}</div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
               <button style={ghostBtn} onClick={() => setConfirmOpen(false)} disabled={actionLoading}>
@@ -368,9 +351,7 @@ function MembersPanel({
   );
 }
 
-// READ from the view (timeline/ordering/analytics)
 const ENTRIES_READ = "maintenance_entries_timeline";
-// WRITE to the real table (insert/update/delete must hit a table, not a view)
 const ENTRIES_WRITE = "maintenance_entries";
 
 function SharingPanel({
@@ -378,11 +359,11 @@ function SharingPanel({
   myRole,
 }: {
   aircraftId: string;
-  myRole: "owner" | "member" | "admin" | null;
+  myRole: MyRole | null;
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
-  const card: React.CSSProperties = {
+  const card: CSSProperties = {
     padding: 14,
     borderRadius: 12,
     background: "#0f172a",
@@ -390,7 +371,7 @@ function SharingPanel({
     marginBottom: 14,
   };
 
-  const buttonStyle: React.CSSProperties = {
+  const buttonStyle: CSSProperties = {
     border: "1px solid rgba(255,255,255,0.18)",
     background: "rgba(255,255,255,0.06)",
     color: "#e5e7eb",
@@ -404,7 +385,6 @@ function SharingPanel({
 
   return (
     <div style={card}>
-      {/* Header row */}
       <div
         onClick={() => setCollapsed((v) => !v)}
         style={{
@@ -430,16 +410,13 @@ function SharingPanel({
           </span>
 
           <div>
-            <div style={{ color: "#e5e7eb", fontWeight: 900, fontSize: 16 }}>
-              Sharing & Members
-            </div>
+            <div style={{ color: "#e5e7eb", fontWeight: 900, fontSize: 16 }}>Sharing & Members</div>
             <div style={{ color: "#9ca3af", fontSize: 13 }}>
               Invite people and manage who can access this aircraft.
             </div>
           </div>
         </div>
 
-        {/* Small status pill */}
         <div
           style={{
             fontSize: 12,
@@ -456,7 +433,6 @@ function SharingPanel({
         </div>
       </div>
 
-      {/* Body */}
       {collapsed ? null : (
         <div style={{ marginTop: 12 }}>
           {!canManage ? (
@@ -465,15 +441,12 @@ function SharingPanel({
             </div>
           ) : (
             <div style={{ marginBottom: 12 }}>
-              {/* Keep your existing InviteMemberBox exactly as-is */}
               <InviteMemberBox aircraftId={String(aircraftId)} role="member" />
             </div>
           )}
 
-          {/* Keep your existing MembersPanel exactly as-is */}
           <MembersPanel aircraftId={String(aircraftId)} myRole={myRole} />
 
-          {/* Optional: quick collapse button at bottom */}
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
             <button
               type="button"
@@ -501,72 +474,59 @@ export default function AircraftMaintenancePage() {
     return Array.isArray(raw) ? raw[0] : raw;
   }, [params]);
 
-  // ---- Auth
   const [userId, setUserId] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // ---- Data
   const [aircraft, setAircraft] = useState<AircraftRow | null>(null);
   const [entries, setEntries] = useState<MxEntryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>("");
-  // ===== Monthly Spend selector (matches Rental Income selector style) =====
-const [spendView, setSpendView] = useState<"all" | "year" | "month">("all");
-const [spendYear, setSpendYear] = useState<number>(new Date().getFullYear());
-const [spendMonth, setSpendMonth] = useState<number>(new Date().getMonth()); // 0-11
 
-// Years present in entries (safer: read year from string)
-const spendYears = useMemo(() => {
-  const ys = new Set<number>();
-  (entries ?? []).forEach((e: any) => {
-    const iso = e?.entry_date;
-    if (typeof iso !== "string" || iso.length < 4) return;
-    const y = Number(iso.slice(0, 4));
-    if (Number.isFinite(y)) ys.add(y);
-  });
-  return Array.from(ys).sort((a, b) => b - a);
-}, [entries]);
+  const [spendView, setSpendView] = useState<"all" | "year" | "month">("all");
+  const [spendYear, setSpendYear] = useState<number>(new Date().getFullYear());
+  const [spendMonth, setSpendMonth] = useState<number>(new Date().getMonth());
 
-// Keep selected year valid if entries change
-useEffect(() => {
-  if (spendYears.length && !spendYears.includes(spendYear)) {
-    setSpendYear(spendYears[0]);
-  }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [spendYears.join(",")]);
+  const spendYears = useMemo(() => {
+    const ys = new Set<number>();
+    (entries ?? []).forEach((e: any) => {
+      const iso = e?.entry_date;
+      if (typeof iso !== "string" || iso.length < 4) return;
+      const y = Number(iso.slice(0, 4));
+      if (Number.isFinite(y)) ys.add(y);
+    });
+    return Array.from(ys).sort((a, b) => b - a);
+  }, [entries]);
 
-const monthLabels = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-// Filter entries for MonthlyCostChart based on selector
-const monthlySpendEntries = useMemo(() => {
-  const list = entries ?? [];
-  if (spendView === "all") return list;
-
-  return list.filter((e: any) => {
-    if (!e?.entry_date) return false;
-    const d = new Date(e.entry_date);
-    if (isNaN(d.getTime())) return false;
-
-    if (spendView === "year") {
-      return d.getFullYear() === spendYear;
+  useEffect(() => {
+    if (spendYears.length && !spendYears.includes(spendYear)) {
+      setSpendYear(spendYears[0]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spendYears.join(",")]);
 
-    // month view
-    return d.getFullYear() === spendYear && d.getMonth() === spendMonth;
-  });
-}, [entries, spendView, spendYear, spendMonth]);
+  const monthLabels = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-  // ---- Benchmark
+  const monthlySpendEntries = useMemo(() => {
+    const list = entries ?? [];
+    if (spendView === "all") return list;
+
+    return list.filter((e: any) => {
+      if (!e?.entry_date) return false;
+      const d = new Date(e.entry_date);
+      if (isNaN(d.getTime())) return false;
+
+      if (spendView === "year") return d.getFullYear() === spendYear;
+
+      return d.getFullYear() === spendYear && d.getMonth() === spendMonth;
+    });
+  }, [entries, spendView, spendYear, spendMonth]);
+
   const [benchmark, setBenchmark] = useState<BenchmarkRow | null>(null);
 
-  // ✅ Role (owner/member/admin) for invite permissions + page guard
-  const [myRole, setMyRole] = useState<"owner" | "member" | "admin" | null>(
-    null
-  );
+ const [myRole, setMyRole] = useState<MyRole | null>(null);
   const [roleLoading, setRoleLoading] = useState(true);
 
-  // ---- Add Form
   const [entryDate, setEntryDate] = useState("");
   const [category, setCategory] = useState("Maintenance");
   const [amount, setAmount] = useState("");
@@ -574,7 +534,6 @@ const monthlySpendEntries = useMemo(() => {
   const [notes, setNotes] = useState("");
   const [showAddEntry, setShowAddEntry] = useState(false);
 
-  // ---- Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDate, setEditDate] = useState("");
   const [editCategory, setEditCategory] = useState("Maintenance");
@@ -582,8 +541,13 @@ const monthlySpendEntries = useMemo(() => {
   const [editTach, setEditTach] = useState("");
   const [editNotes, setEditNotes] = useState("");
 
-  // ---- 3-dot menu state
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+
+  const [uiVisibility, setUiVisibility] = useState({
+    showMaintenance: true,
+    showOperating: true,
+    showRental: true,
+  });
 
   const ALLOWED_CATEGORIES = [
     "Maintenance",
@@ -597,7 +561,6 @@ const monthlySpendEntries = useMemo(() => {
     "Other",
   ];
 
-  // ---- Styles
   const pageWrap: CSSProperties = {
     padding: 20,
     maxWidth: 980,
@@ -614,39 +577,32 @@ const monthlySpendEntries = useMemo(() => {
     border: "1px solid rgba(255,255,255,0.08)",
   };
 
-  const chartGrid: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  gap: 12,
-  marginBottom: 12,
-};
+  const pillRow: CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  };
 
-  const pillRow: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  flexWrap: "wrap",
-};
+  const pillSelect: CSSProperties = {
+    appearance: "none",
+    WebkitAppearance: "none",
+    MozAppearance: "none",
+    padding: "8px 12px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.15)",
+    background: "rgba(255,255,255,0.10)",
+    color: "white",
+    fontWeight: 800,
+    cursor: "pointer",
+    lineHeight: 1,
+  };
 
-const pillSelect: React.CSSProperties = {
-  appearance: "none",
-  WebkitAppearance: "none",
-  MozAppearance: "none",
-  padding: "8px 12px",
-  borderRadius: 999,
-  border: "1px solid rgba(255,255,255,0.15)",
-  background: "rgba(255,255,255,0.10)",
-  color: "white",
-  fontWeight: 800,
-  cursor: "pointer",
-  lineHeight: 1,
-};
-
-const pillLabel: React.CSSProperties = {
-  opacity: 0.9,
-  fontWeight: 800,
-  fontSize: 12,
-};
+  const pillLabel: CSSProperties = {
+    opacity: 0.9,
+    fontWeight: 800,
+    fontSize: 12,
+  };
 
   const cardLight: CSSProperties = {
     padding: 14,
@@ -675,10 +631,7 @@ const pillLabel: React.CSSProperties = {
     fontWeight: 600,
   };
 
-  const ghostButton: CSSProperties = {
-    ...buttonStyle,
-    background: "transparent",
-  };
+  const ghostButton: CSSProperties = { ...buttonStyle, background: "transparent" };
 
   const iconButton: CSSProperties = {
     width: 38,
@@ -723,7 +676,34 @@ const pillLabel: React.CSSProperties = {
     fontWeight: 700,
   };
 
-  // ---- Close menu on outside click / Esc
+  // ✅ $/hr pill
+  const hrPill: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.15)",
+    background: "rgba(255,255,255,0.08)",
+    fontWeight: 900,
+    fontSize: 12,
+    color: "#e5e7eb",
+    whiteSpace: "nowrap",
+  };
+
+  function fmtHr(n: number | null) {
+    if (n == null || !Number.isFinite(n)) return "—";
+    return `$${n.toFixed(2)}/hr`;
+  }
+
+  function HrRight({ label, value }: { label: string; value: number | null }) {
+    return (
+      <span style={hrPill}>
+        <span style={{ opacity: 0.8 }}>{label}:</span> {fmtHr(value)}
+      </span>
+    );
+  }
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpenMenuId(null);
@@ -739,7 +719,6 @@ const pillLabel: React.CSSProperties = {
     };
   }, []);
 
-  // ---- Auth bootstrap
   useEffect(() => {
     let mounted = true;
 
@@ -773,13 +752,48 @@ const pillLabel: React.CSSProperties = {
     };
   }, []);
 
-  // ---- Protect page (redirect if not logged in)
   useEffect(() => {
     if (authLoading) return;
     if (!userId) router.replace("/login");
   }, [authLoading, userId, router]);
 
-  // ---- Load aircraft + role + entries + benchmark
+  // ✅ totals state
+  const [operatingTotalAllTime, setOperatingTotalAllTime] = useState<number>(0);
+  const [rentalTotalAllTime, setRentalTotalAllTime] = useState<number>(0);
+
+  async function sumAmountsFromTable(table: string, aid: string): Promise<number | null> {
+    try {
+      const { data, error } = await supabase.from(table).select("amount, revenue").eq("aircraft_id", aid);
+      if (error) return null;
+
+      const rows = (data as any[]) ?? [];
+      let sum = 0;
+
+      for (const r of rows) {
+        const a = typeof r?.amount === "number" ? r.amount : null;
+        const rev = typeof r?.revenue === "number" ? r.revenue : null;
+        if (a != null) sum += a;
+        else if (rev != null) sum += rev;
+      }
+
+      return sum;
+    } catch {
+      return null;
+    }
+  }
+
+  async function loadOperatingAndRentalTotals(aid: string) {
+    const op =
+      (await sumAmountsFromTable("operating_expenses", aid)) ??
+      (await sumAmountsFromTable("operating_costs", aid));
+    setOperatingTotalAllTime(op ?? 0);
+
+    const rent =
+      (await sumAmountsFromTable("rental_income", aid)) ??
+      (await sumAmountsFromTable("rental_revenue", aid));
+    setRentalTotalAllTime(rent ?? 0);
+  }
+
   async function loadAll() {
     if (!aircraftId) return;
     if (!userId) return;
@@ -788,7 +802,6 @@ const pillLabel: React.CSSProperties = {
     setError("");
 
     try {
-      // Aircraft
       const { data: aircraftData, error: aircraftErr } = await supabase
         .from("aircraft")
         .select("id, user_id, tail_number, make, model, year, created_at")
@@ -806,7 +819,6 @@ const pillLabel: React.CSSProperties = {
         return;
       }
 
-      // Role
       setRoleLoading(true);
 
       const { data: adminRow, error: adminErr } = await supabase
@@ -844,12 +856,9 @@ const pillLabel: React.CSSProperties = {
 
       setRoleLoading(false);
 
-      // Entries (READ view)
       const { data: entryData, error: entryErr } = await supabase
         .from(ENTRIES_READ)
-        .select(
-          "id, user_id, aircraft_id, entry_date, category, amount, tach_hours, notes, created_at"
-        )
+        .select("id, user_id, aircraft_id, entry_date, category, amount, tach_hours, notes, created_at")
         .eq("aircraft_id", aircraftId)
         .order("entry_date", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
@@ -857,7 +866,8 @@ const pillLabel: React.CSSProperties = {
       if (entryErr) throw entryErr;
       setEntries(entryData ?? []);
 
-      // Benchmark
+      await loadOperatingAndRentalTotals(String(aircraftId));
+
       const { data: benchData, error: benchErr } = await supabase
         .from("maintenance_benchmarks")
         .select("id, aircraft_type, hourly_cost, annual_cost, effective_date")
@@ -884,13 +894,8 @@ const pillLabel: React.CSSProperties = {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aircraftId, userId, authLoading]);
 
-  // ---- Calculations (all-time)
   const totalSpend = useMemo(
-    () =>
-      entries.reduce(
-        (sum, e) => sum + (typeof e.amount === "number" ? e.amount : 0),
-        0
-      ),
+    () => entries.reduce((sum, e) => sum + (typeof e.amount === "number" ? e.amount : 0), 0),
     [entries]
   );
 
@@ -911,7 +916,14 @@ const pillLabel: React.CSSProperties = {
     return hoursFlown > 0 ? totalSpend / hoursFlown : null;
   }, [hoursFlown, totalSpend]);
 
-  // ---- Benchmark compare
+  const operatingPerHour = useMemo(() => {
+    return hoursFlown > 0 ? operatingTotalAllTime / hoursFlown : null;
+  }, [hoursFlown, operatingTotalAllTime]);
+
+  const rentalPerHour = useMemo(() => {
+    return hoursFlown > 0 ? rentalTotalAllTime / hoursFlown : null;
+  }, [hoursFlown, rentalTotalAllTime]);
+
   const benchmarkCompare = useMemo(() => {
     if (!benchmark) return null;
     if (benchmark.hourly_cost <= 0) return null;
@@ -920,12 +932,7 @@ const pillLabel: React.CSSProperties = {
     const diff = costPerHour - benchmark.hourly_cost;
     const pct = (diff / benchmark.hourly_cost) * 100;
 
-    return {
-      diff,
-      pct,
-      above: diff > 0,
-      equalish: Math.abs(pct) < 0.5,
-    };
+    return { diff, pct, above: diff > 0, equalish: Math.abs(pct) < 0.5 };
   }, [benchmark, costPerHour]);
 
   const benchmarkStatus = useMemo(() => {
@@ -936,7 +943,6 @@ const pillLabel: React.CSSProperties = {
     return { label: "High", color: "#ef4444" };
   }, [benchmarkCompare]);
 
-  // ---- Add Entry (allows backdated + lower tach)
   async function addEntry(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
@@ -958,21 +964,17 @@ const pillLabel: React.CSSProperties = {
       return setError("Tach Hours must be a number.");
     }
 
-    // ✅ If cost is entered, require tach (keeps cost/hr sane)
     if (amountNum !== null && tachNum === null) {
       setSaving(false);
       return setError("Tach hours are required when entering a cost.");
     }
 
-    // Date is optional, but must be valid if provided
     if (entryDate.trim() !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(entryDate.trim())) {
       setSaving(false);
       return setError("Date must be YYYY-MM-DD (or leave blank).");
     }
 
-    const safeCategory = ALLOWED_CATEGORIES.includes(category)
-      ? category
-      : "Maintenance";
+    const safeCategory = ALLOWED_CATEGORIES.includes(category) ? category : "Maintenance";
 
     const payload = {
       user_id: userId,
@@ -1002,16 +1004,11 @@ const pillLabel: React.CSSProperties = {
     setShowAddEntry(false);
   }
 
-  // ---- Edit helpers
   function startEdit(row: MxEntryRow) {
     setOpenMenuId(null);
     setEditingId(row.id);
     setEditDate(row.entry_date ?? "");
-    setEditCategory(
-      ALLOWED_CATEGORIES.includes(row.category ?? "")
-        ? (row.category as string)
-        : "Maintenance"
-    );
+    setEditCategory(ALLOWED_CATEGORIES.includes(row.category ?? "") ? (row.category as string) : "Maintenance");
     setEditAmount(row.amount == null ? "" : String(row.amount));
     setEditTach(row.tach_hours == null ? "" : String(row.tach_hours));
     setEditNotes(row.notes ?? "");
@@ -1052,9 +1049,7 @@ const pillLabel: React.CSSProperties = {
 
     const patch = {
       entry_date: editDate.trim() === "" ? null : editDate.trim(),
-      category: ALLOWED_CATEGORIES.includes(editCategory)
-        ? editCategory
-        : "Maintenance",
+      category: ALLOWED_CATEGORIES.includes(editCategory) ? editCategory : "Maintenance",
       amount: amountNum,
       tach_hours: tachNum,
       notes: editNotes.trim() === "" ? null : editNotes.trim(),
@@ -1091,7 +1086,6 @@ const pillLabel: React.CSSProperties = {
     if (editingId === id) cancelEdit();
   }
 
-  // ---- Group entries by YEAR (keeps your existing entry order)
   const entriesByYear = useMemo(() => {
     const withDates = entries.filter((e) => !!e.entry_date);
     const withoutDates = entries.filter((e) => !e.entry_date);
@@ -1121,16 +1115,7 @@ const pillLabel: React.CSSProperties = {
         minHeight: "100vh",
       }}
     >
-      {/* Top bar */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          marginBottom: 10,
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
         <button style={ghostButton} onClick={() => router.push("/app")}>
           ← Back to Aircraft
         </button>
@@ -1159,469 +1144,522 @@ const pillLabel: React.CSSProperties = {
         </div>
       )}
 
-      {/* Aircraft Card */}
-    <Section
-  title="Aircraft"
-  subtitle="Your aircraft details and access status."
-  right={
-    <span style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>
-      {authLoading ? "Checking…" : userId ? "Logged in ✅" : "Not logged in ❌"}
-    </span>
-  }
->
-  {loading ? (
-    <div>Loading…</div>
-  ) : aircraft ? (
-    <div style={{ fontSize: 18, fontWeight: 800 }}>
-      {aircraft.tail_number ?? "Untitled"}
-      {aircraft.model ? ` — ${aircraft.model}` : ""}
-    </div>
-  ) : (
-    <div style={{ fontSize: 14, opacity: 0.9 }}>
-      Couldn’t find aircraft for id: <code>{String(aircraftId)}</code>
-    </div>
-  )}
-</Section>
-{!roleLoading && aircraft && (
-  <>
-    {(myRole === "owner" || myRole === "admin") && (
-      <SharingPanel aircraftId={String(aircraftId)} myRole={myRole} />
-    )}
-
-    {/* Rental panel: members can view, only owner/admin can edit (your panel already gates edits) */}
-    <RentalRevenuePanel aircraftId={aircraft.id} myRole={myRole ?? undefined} />
-
-    {/* V2: Operating Expenses */}
-    <OperatingExpensesPanel aircraftId={aircraft.id} myRole={myRole} />
-  </>
-)}
-
-      {/* Summary Cards */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
-        <div style={{ ...cardDark, flex: 1, minWidth: 220 }}>
-          <div style={smallMuted}>Total Spend</div>
-          <div style={{ fontSize: 22, fontWeight: 900 }}>${totalSpend.toFixed(2)}</div>
-        </div>
-
-        <div style={{ ...cardDark, flex: 1, minWidth: 220 }}>
-          <div style={smallMuted}>Hours Logged</div>
-          <div style={{ fontSize: 22, fontWeight: 900 }}>{hoursFlown.toFixed(1)}</div>
-        </div>
-
-        <div style={{ ...cardDark, flex: 1, minWidth: 220 }}>
-          <div style={smallMuted}>Cost / Hour</div>
-          <div style={{ fontSize: 22, fontWeight: 900 }}>
-            {costPerHour != null ? `$${costPerHour.toFixed(2)}` : "—"}
-          </div>
-        </div>
-      </div>
-
-      {/* Benchmark Card */}
-      <div style={{ ...cardDark, marginBottom: 18 }}>
-        <div style={smallMuted}>Industry Estimated Benchmark (C172)</div>
-
-        {!benchmark ? (
-          <div style={{ marginTop: 8, opacity: 0.85 }}>
-            No industry estimate found yet. Add one to{" "}
-            <code>maintenance_benchmarks</code> for{" "}
-            <b>aircraft_type = "C172"</b> (or 172 / 172N / C172N).
-          </div>
-        ) : (
-          <div style={{ marginTop: 8 }}>
-            <div style={{ fontSize: 16, fontWeight: 800 }}>
-              Avg: ${benchmark.hourly_cost.toFixed(2)} / hr{" "}
-              {benchmark.annual_cost != null ? ` • $${benchmark.annual_cost.toFixed(0)} / yr` : ""}
-            </div>
-
-            <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              {benchmarkCompare ? (
-                <>
-                  {benchmarkStatus && (
-                    <span
-                      style={{
-                        padding: "6px 10px",
-                        borderRadius: 999,
-                        fontWeight: 900,
-                        fontSize: 12,
-                        border: `1px solid ${benchmarkStatus.color}66`,
-                        background: `${benchmarkStatus.color}35`,
-                        color: benchmarkStatus.color,
-                      }}
-                    >
-                      {benchmarkStatus.label}
-                    </span>
-                  )}
-
-                  <span style={{ opacity: 0.92 }}>
-                    {benchmarkCompare.equalish ? (
-                      <>You’re basically right on average ✅</>
-                    ) : benchmarkCompare.above ? (
-                      <>
-                        You’re <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b> above the industry estimate (≈ $
-                        {benchmarkCompare.diff.toFixed(2)} / hr) 📈
-                      </>
-                    ) : (
-                      <>
-                        You’re <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b> below the industry estimate (≈ $
-                        {Math.abs(benchmarkCompare.diff).toFixed(2)} / hr) 📉
-                      </>
-                    )}
-                  </span>
-                </>
-              ) : (
-                <span style={{ opacity: 0.85 }}>
-                  Add more entries with Amount + Tach (at least 2 different tach values) to compare.
-                </span>
-              )}
-            </div>
-
-            <div style={{ marginTop: 6, ...smallMuted }}>Effective: {benchmark.effective_date}</div>
-          </div>
-        )}
-      </div>
-
-      <AllInCostPanel
-  aircraftId={String(aircraftId)}
-  myRole={myRole}
-  maintenanceSpendAllTime={totalSpend}
-  hoursFlownAllTime={hoursFlown}
-/>
-
-{/* Charts */}
-<div
-  style={{
-    display: "grid",
-    gridTemplateColumns: "1.35fr 0.65fr",
-    gap: 12,
-    marginBottom: 12,
-  }}
->
-  {/* LEFT (bigger): Cost / Hour Trend */}
-  <div style={{ minWidth: 0 }}>
-    <Section
-      title="Cost / Hour Trend"
-      subtitle="How your cost-per-hour evolves over time."
-    >
-      <div style={{ height: 340 }}>
-        <CostPerHourTrendChart entries={entries} />
-      </div>
-    </Section>
-  </div>
-
-  {/* RIGHT (smaller): Monthly Spend */}
-  <div style={{ minWidth: 0 }}>
-    <Section
-      title="Monthly Spend"
-      subtitle="Monthly totals across your entries."
-      right={
-        <div style={pillRow}>
-          <span style={pillLabel}>View</span>
-
-          <select
-            value={spendView}
-            onChange={(e) => setSpendView(e.target.value as any)}
-            style={pillSelect}
-          >
-      
-            <option value="all">All Time</option>
-            <option value="year">Year</option>
-<option value="month">Month</option>
-          </select>
-
-          {spendView !== "all" && (
-            <select
-              value={spendYear}
-              onChange={(e) => setSpendYear(Number(e.target.value))}
-              style={pillSelect}
-            >
-              {(spendYears.length ? spendYears : [new Date().getFullYear()]).map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </select>
-          )}
-
-          {spendView === "month" && (
-            <select
-              value={spendMonth}
-              onChange={(e) => setSpendMonth(Number(e.target.value))}
-              style={pillSelect}
-            >
-              {monthLabels.map((m, idx) => (
-                <option key={m} value={idx}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-      }
-    >
-     <div style={{ minWidth: 0 }}>
-  <MonthlyCostChart entries={monthlySpendEntries} />
-</div>
-    </Section>
-  </div>
-</div>
-
-{/* Mobile/Small screen fallback */}
-<style jsx>{`
-  @media (max-width: 900px) {
-    div[style*="grid-template-columns: 1.35fr 0.65fr"] {
-      grid-template-columns: 1fr !important;
-    }
-  }
-`}</style>
-
-      {/* Entries section */}
-      <div style={cardLight}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
-          <h2 style={{ margin: 0 }}>Entries</h2>
-
-          <button style={buttonStyle} type="button" onClick={() => setShowAddEntry((v) => !v)}>
-            {showAddEntry ? "Close" : "+ Add Entry"}
-          </button>
-        </div>
-
-        {showAddEntry && (
-          <div style={{ ...cardDark, marginBottom: 14 }}>
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>Add Maintenance Entry</h3>
-
-            <form onSubmit={addEntry}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span style={smallMuted}>Date (optional)</span>
-                  <input style={inputStyle} type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} />
-                </label>
-
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span style={smallMuted}>Category</span>
-                  <select style={inputStyle} value={category} onChange={(e) => setCategory(e.target.value)}>
-                    {ALLOWED_CATEGORIES.map((c) => (
-                      <option key={c} value={c} style={{ color: "black" }}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span style={smallMuted}>Amount ($)</span>
-                  <input
-                    style={inputStyle}
-                    inputMode="decimal"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    placeholder="e.g. 245.00"
-                  />
-                </label>
-
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span style={smallMuted}>Tach Hours</span>
-                  <input
-                    style={inputStyle}
-                    inputMode="decimal"
-                    value={tachHours}
-                    onChange={(e) => setTachHours(e.target.value)}
-                    placeholder="e.g. 1834.6"
-                  />
-                </label>
-
-                <label style={{ display: "grid", gap: 6, gridColumn: "1 / -1" }}>
-                  <span style={smallMuted}>Notes</span>
-                  <input
-                    style={inputStyle}
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="What was done?"
-                  />
-                </label>
-              </div>
-
-              <button type="submit" style={{ ...buttonStyle, marginTop: 12 }} disabled={saving}>
-                {saving ? "Saving…" : "Save Entry"}
-              </button>
-            </form>
-          </div>
-        )}
-
+      <Section
+        title="Aircraft"
+        subtitle="Your aircraft details and access status."
+        right={
+          <span style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>
+            {authLoading ? "Checking…" : userId ? "Logged in ✅" : "Not logged in ❌"}
+          </span>
+        }
+      >
         {loading ? (
           <div>Loading…</div>
-        ) : entries.length === 0 ? (
-          <div style={{ opacity: 0.7 }}>No entries yet.</div>
+        ) : aircraft ? (
+          <div style={{ fontSize: 18, fontWeight: 800 }}>
+            {aircraft.tail_number ?? "Untitled"}
+            {aircraft.model ? ` — ${aircraft.model}` : ""}
+          </div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-              <thead>
-                <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.10)" }}>
-                  <th style={{ padding: "8px 10px" }}>Date</th>
-                  <th style={{ padding: "8px 10px" }}>Category</th>
-                  <th style={{ padding: "8px 10px" }}>Amount</th>
-                  <th style={{ padding: "8px 10px" }}>Tach</th>
-                  <th style={{ padding: "8px 10px" }}>Notes</th>
-                  <th style={{ padding: "8px 10px", width: 90 }}> </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {entriesByYear.map((group, idx) => (
-                  <Fragment key={group.year}>
-                    {idx !== 0 && (
-                      <tr>
-                        <td colSpan={6} style={{ padding: 0, height: 12 }} />
-                      </tr>
-                    )}
-
-                    <tr>
-                      <td
-                        colSpan={6}
-                        style={{
-                          padding: "14px 10px 6px",
-                          fontWeight: 900,
-                          color: "#e5e7eb",
-                          letterSpacing: 0.5,
-                          borderBottom: "1px solid rgba(255,255,255,0.10)",
-                        }}
-                      >
-                        {group.year}
-                      </td>
-                    </tr>
-
-                    {group.rows.map((r) => {
-                      const isEditing = editingId === r.id;
-
-                      return (
-                        <tr key={r.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                          <td style={{ padding: "8px 10px", width: 160 }}>
-                            {isEditing ? (
-                              <input
-                                style={{ ...inputStyle, width: "100%" }}
-                                type="date"
-                                value={editDate}
-                                onChange={(e) => setEditDate(e.target.value)}
-                              />
-                            ) : (
-                              r.entry_date ?? "-"
-                            )}
-                          </td>
-
-                          <td style={{ padding: "8px 10px", width: 160 }}>
-                            {isEditing ? (
-                              <select
-                                style={{ ...inputStyle, width: "100%" }}
-                                value={editCategory}
-                                onChange={(e) => setEditCategory(e.target.value)}
-                              >
-                                {ALLOWED_CATEGORIES.map((c) => (
-                                  <option key={c} value={c} style={{ color: "black" }}>
-                                    {c}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              r.category ?? "-"
-                            )}
-                          </td>
-
-                          <td style={{ padding: "8px 10px", width: 140 }}>
-                            {isEditing ? (
-                              <input
-                                style={{ ...inputStyle, width: "100%" }}
-                                inputMode="decimal"
-                                value={editAmount}
-                                onChange={(e) => setEditAmount(e.target.value)}
-                                placeholder="245.00"
-                              />
-                            ) : typeof r.amount === "number" ? (
-                              `$${r.amount.toFixed(2)}`
-                            ) : (
-                              "-"
-                            )}
-                          </td>
-
-                          <td style={{ padding: "8px 10px", width: 120 }}>
-                            {isEditing ? (
-                              <input
-                                style={{ ...inputStyle, width: "100%" }}
-                                inputMode="decimal"
-                                value={editTach}
-                                onChange={(e) => setEditTach(e.target.value)}
-                                placeholder="1834.6"
-                              />
-                            ) : typeof r.tach_hours === "number" ? (
-                              r.tach_hours
-                            ) : (
-                              "-"
-                            )}
-                          </td>
-
-                          <td style={{ padding: "8px 10px" }}>
-                            {isEditing ? (
-                              <input
-                                style={{ ...inputStyle, width: "100%" }}
-                                value={editNotes}
-                                onChange={(e) => setEditNotes(e.target.value)}
-                                placeholder="Notes"
-                              />
-                            ) : (
-                              r.notes ?? "-"
-                            )}
-                          </td>
-
-                          <td style={{ padding: "8px 10px" }}>
-                            {!isEditing ? (
-                              <div style={menuWrap} onClick={(e) => e.stopPropagation()}>
-                                <button
-                                  type="button"
-                                  style={iconButton}
-                                  aria-label="Row actions"
-                                  onClick={() => setOpenMenuId((cur) => (cur === r.id ? null : r.id))}
-                                  disabled={saving}
-                                >
-                                  ⋮
-                                </button>
-
-                                {openMenuId === r.id && (
-                                  <div style={menuPanel}>
-                                    <button type="button" style={menuItem} onClick={() => startEdit(r)}>
-                                      Edit
-                                    </button>
-                                    <button
-                                      type="button"
-                                      style={{ ...menuItem, color: "#fecaca" }}
-                                      onClick={() => deleteEntry(r.id)}
-                                    >
-                                      Delete
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div style={{ display: "flex", gap: 8 }}>
-                                <button type="button" style={buttonStyle} disabled={saving} onClick={() => saveEdit(r.id)}>
-                                  Save
-                                </button>
-                                <button type="button" style={ghostButton} disabled={saving} onClick={cancelEdit}>
-                                  Cancel
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
+          <div style={{ fontSize: 14, opacity: 0.9 }}>
+            Couldn’t find aircraft for id: <code>{String(aircraftId)}</code>
           </div>
         )}
+      </Section>
 
-        <div style={{ marginTop: 10, ...smallMuted }}>
-          ✅ Edits/deletes work because writes go to <code>{ENTRIES_WRITE}</code> (not the view).
-        </div>
-      </div>
+      {!roleLoading && aircraft && (
+        <>
+          {(myRole === "owner" || myRole === "admin") && (
+            <SharingPanel aircraftId={String(aircraftId)} myRole={myRole} />
+          )}
+
+     {/* Rental */}
+{uiVisibility.showRental && myRole && (
+  <Section
+    title="Rental Income"
+    subtitle="Track rental revenue and trends."
+    right={<HrRight label="Rental" value={rentalPerHour} />}
+  >
+    <RentalRevenuePanel aircraftId={aircraft.id} myRole={myRole} />
+  </Section>
+)}
+
+{/* Operating */}
+{uiVisibility.showOperating && myRole && (
+  <Section
+    title="Operating Costs"
+    subtitle="Track non-maintenance operating expenses."
+    right={<HrRight label="Operating" value={operatingPerHour} />}
+  >
+    <OperatingExpensesPanel aircraftId={aircraft.id} myRole={myRole} />
+  </Section>
+)}
+
+          {/* Summary Cards */}
+          <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+            <div style={{ ...cardDark, flex: 1, minWidth: 220 }}>
+              <div style={smallMuted}>Total Spend</div>
+              <div style={{ fontSize: 22, fontWeight: 900 }}>${totalSpend.toFixed(2)}</div>
+            </div>
+
+            <div style={{ ...cardDark, flex: 1, minWidth: 220 }}>
+              <div style={smallMuted}>Hours Logged</div>
+              <div style={{ fontSize: 22, fontWeight: 900 }}>{hoursFlown.toFixed(1)}</div>
+            </div>
+
+            <div style={{ ...cardDark, flex: 1, minWidth: 220 }}>
+              <div style={smallMuted}>Cost / Hour</div>
+              <div style={{ fontSize: 22, fontWeight: 900 }}>
+                {costPerHour != null ? `$${costPerHour.toFixed(2)}` : "—"}
+              </div>
+            </div>
+          </div>
+
+          {/* Benchmark Card */}
+          <div style={{ ...cardDark, marginBottom: 18 }}>
+            <div style={smallMuted}>Industry Estimated Benchmark (C172)</div>
+
+            {!benchmark ? (
+              <div style={{ marginTop: 8, opacity: 0.85 }}>
+                No industry estimate found yet. Add one to{" "}
+                <code>maintenance_benchmarks</code> for{" "}
+                <b>aircraft_type = "C172"</b> (or 172 / 172N / C172N).
+              </div>
+            ) : (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>
+                  Avg: ${benchmark.hourly_cost.toFixed(2)} / hr{" "}
+                  {benchmark.annual_cost != null ? ` • $${benchmark.annual_cost.toFixed(0)} / yr` : ""}
+                </div>
+
+                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  {benchmarkCompare ? (
+                    <>
+                      {benchmarkStatus && (
+                        <span
+                          style={{
+                            padding: "6px 10px",
+                            borderRadius: 999,
+                            fontWeight: 900,
+                            fontSize: 12,
+                            border: `1px solid ${benchmarkStatus.color}66`,
+                            background: `${benchmarkStatus.color}35`,
+                            color: benchmarkStatus.color,
+                          }}
+                        >
+                          {benchmarkStatus.label}
+                        </span>
+                      )}
+
+                      <span style={{ opacity: 0.92 }}>
+                        {benchmarkCompare.equalish ? (
+                          <>You’re basically right on average ✅</>
+                        ) : benchmarkCompare.above ? (
+                          <>
+                            You’re <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b> above the industry estimate (≈ $
+                            {benchmarkCompare.diff.toFixed(2)} / hr) 📈
+                          </>
+                        ) : (
+                          <>
+                            You’re <b>{Math.abs(benchmarkCompare.pct).toFixed(1)}%</b> below the industry estimate (≈ $
+                            {Math.abs(benchmarkCompare.diff).toFixed(2)} / hr) 📉
+                          </>
+                        )}
+                      </span>
+                    </>
+                  ) : (
+                    <span style={{ opacity: 0.85 }}>
+                      Add more entries with Amount + Tach (at least 2 different tach values) to compare.
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ marginTop: 6, ...smallMuted }}>Effective: {benchmark.effective_date}</div>
+              </div>
+            )}
+          </div>
+
+          <AllInCostPanel
+            aircraftId={String(aircraftId)}
+            myRole={myRole}
+            maintenanceSpendAllTime={totalSpend}
+            hoursFlownAllTime={hoursFlown}
+            onVisibilityChange={(v) => {
+  setUiVisibility({
+    showMaintenance: v.showMaintenance,
+    showOperating: v.showOperating,
+    showRental: v.showRental,
+  });
+}}
+          />
+
+          {/* Charts */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1.35fr 0.65fr",
+              gap: 12,
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <Section
+                title="Cost / Hour Trend"
+                subtitle="How your cost-per-hour evolves over time."
+                right={<HrRight label="Maintenance" value={costPerHour} />}
+              >
+                <div style={{ height: 340 }}>
+                  <CostPerHourTrendChart entries={entries} />
+                </div>
+              </Section>
+            </div>
+
+            <div style={{ minWidth: 0 }}>
+              <Section
+                title="Monthly Spend"
+                subtitle="Monthly totals across your entries."
+                right={
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <HrRight label="Maintenance" value={costPerHour} />
+                    <div style={pillRow}>
+                      <span style={pillLabel}>View</span>
+
+                      <select value={spendView} onChange={(e) => setSpendView(e.target.value as any)} style={pillSelect}>
+                        <option value="all">All Time</option>
+                        <option value="year">Year</option>
+                        <option value="month">Month</option>
+                      </select>
+
+                      {spendView !== "all" && (
+                        <select value={spendYear} onChange={(e) => setSpendYear(Number(e.target.value))} style={pillSelect}>
+                          {(spendYears.length ? spendYears : [new Date().getFullYear()]).map((y) => (
+                            <option key={y} value={y}>
+                              {y}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      {spendView === "month" && (
+                        <select value={spendMonth} onChange={(e) => setSpendMonth(Number(e.target.value))} style={pillSelect}>
+                          {monthLabels.map((m, idx) => (
+                            <option key={m} value={idx}>
+                              {m}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  </div>
+                }
+              >
+                <div style={{ minWidth: 0 }}>
+                  <MonthlyCostChart entries={monthlySpendEntries} />
+                </div>
+              </Section>
+            </div>
+          </div>
+
+          <style jsx>{`
+            @media (max-width: 900px) {
+              div[style*="grid-template-columns: 1.35fr 0.65fr"] {
+                grid-template-columns: 1fr !important;
+              }
+            }
+          `}</style>
+
+          {/* Entries section */}
+          <div style={cardLight}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
+              <h2 style={{ margin: 0 }}>Entries</h2>
+
+              <button style={buttonStyle} type="button" onClick={() => setShowAddEntry((v) => !v)}>
+                {showAddEntry ? "Close" : "+ Add Entry"}
+              </button>
+            </div>
+
+            {showAddEntry && (
+              <div style={{ ...cardDark, marginBottom: 14 }}>
+                <h3 style={{ marginTop: 0, marginBottom: 12 }}>Add Maintenance Entry</h3>
+
+                <form onSubmit={addEntry}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span style={smallMuted}>Date (optional)</span>
+                      <input style={inputStyle} type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} />
+                    </label>
+
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span style={smallMuted}>Category</span>
+                      <select style={inputStyle} value={category} onChange={(e) => setCategory(e.target.value)}>
+                        {ALLOWED_CATEGORIES.map((c) => (
+                          <option key={c} value={c} style={{ color: "black" }}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span style={smallMuted}>Amount ($)</span>
+                      <input
+                        style={inputStyle}
+                        inputMode="decimal"
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        placeholder="e.g. 245.00"
+                      />
+                    </label>
+
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span style={smallMuted}>Tach Hours</span>
+                      <input
+                        style={inputStyle}
+                        inputMode="decimal"
+                        value={tachHours}
+                        onChange={(e) => setTachHours(e.target.value)}
+                        placeholder="e.g. 1834.6"
+                      />
+                    </label>
+
+                    <label style={{ display: "grid", gap: 6, gridColumn: "1 / -1" }}>
+                      <span style={smallMuted}>Notes</span>
+                      <input
+                        style={inputStyle}
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder="What was done?"
+                      />
+                    </label>
+                  </div>
+
+                  <button type="submit" style={{ ...buttonStyle, marginTop: 12 }} disabled={saving}>
+                    {saving ? "Saving…" : "Save Entry"}
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {loading ? (
+              <div>Loading…</div>
+            ) : entries.length === 0 ? (
+              <div style={{ opacity: 0.7 }}>No entries yet.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+                  <thead>
+                    <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.10)" }}>
+                      <th style={{ padding: "8px 10px" }}>Date</th>
+                      <th style={{ padding: "8px 10px" }}>Category</th>
+                      <th style={{ padding: "8px 10px" }}>Amount</th>
+                      <th style={{ padding: "8px 10px" }}>Tach</th>
+                      <th style={{ padding: "8px 10px" }}>Notes</th>
+                      <th style={{ padding: "8px 10px" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entriesByYear.map((group) => (
+                      <Fragment key={group.year}>
+                        {/* Year divider row */}
+                        <tr>
+                          <td
+                            colSpan={6}
+                            style={{
+                              padding: "10px 10px",
+                              fontWeight: 900,
+                              opacity: 0.9,
+                              background: "rgba(255,255,255,0.04)",
+                              borderTop: "1px solid rgba(255,255,255,0.08)",
+                              borderBottom: "1px solid rgba(255,255,255,0.08)",
+                            }}
+                          >
+                            {group.year}
+                          </td>
+                        </tr>
+
+                        {group.rows.map((row) => {
+                          const isEditing = editingId === row.id;
+
+                          const dateLabel =
+                            row.entry_date && row.entry_date.length >= 10
+                              ? row.entry_date
+                              : "—";
+
+                          const amtLabel =
+                            typeof row.amount === "number"
+                              ? `$${row.amount.toFixed(2)}`
+                              : "—";
+
+                          const tachLabel =
+                            typeof row.tach_hours === "number"
+                              ? row.tach_hours.toFixed(1)
+                              : "—";
+
+                          return (
+                            <tr
+                              key={row.id}
+                              style={{
+                                borderBottom: "1px solid rgba(255,255,255,0.06)",
+                                verticalAlign: "top",
+                              }}
+                            >
+                              {/* Date */}
+                              <td style={{ padding: "10px 10px", whiteSpace: "nowrap" }}>
+                                {isEditing ? (
+                                  <input
+                                    style={inputStyle}
+                                    type="date"
+                                    value={editDate}
+                                    onChange={(e) => setEditDate(e.target.value)}
+                                  />
+                                ) : (
+                                  dateLabel
+                                )}
+                              </td>
+
+                              {/* Category */}
+                              <td style={{ padding: "10px 10px" }}>
+                                {isEditing ? (
+                                  <select
+                                    style={inputStyle}
+                                    value={editCategory}
+                                    onChange={(e) => setEditCategory(e.target.value)}
+                                  >
+                                    {ALLOWED_CATEGORIES.map((c) => (
+                                      <option key={c} value={c} style={{ color: "black" }}>
+                                        {c}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <span style={{ fontWeight: 900 }}>
+                                    {row.category ?? "—"}
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Amount */}
+                              <td style={{ padding: "10px 10px", whiteSpace: "nowrap" }}>
+                                {isEditing ? (
+                                  <input
+                                    style={inputStyle}
+                                    inputMode="decimal"
+                                    value={editAmount}
+                                    onChange={(e) => setEditAmount(e.target.value)}
+                                    placeholder="e.g. 245.00"
+                                  />
+                                ) : (
+                                  amtLabel
+                                )}
+                              </td>
+
+                              {/* Tach */}
+                              <td style={{ padding: "10px 10px", whiteSpace: "nowrap" }}>
+                                {isEditing ? (
+                                  <input
+                                    style={inputStyle}
+                                    inputMode="decimal"
+                                    value={editTach}
+                                    onChange={(e) => setEditTach(e.target.value)}
+                                    placeholder="e.g. 1834.6"
+                                  />
+                                ) : (
+                                  tachLabel
+                                )}
+                              </td>
+
+                              {/* Notes */}
+                              <td style={{ padding: "10px 10px", minWidth: 220 }}>
+                                {isEditing ? (
+                                  <input
+                                    style={inputStyle}
+                                    value={editNotes}
+                                    onChange={(e) => setEditNotes(e.target.value)}
+                                    placeholder="What was done?"
+                                  />
+                                ) : (
+                                  <span style={{ opacity: 0.9 }}>
+                                    {row.notes ?? "—"}
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Actions */}
+                              <td style={{ padding: "10px 10px", width: 140 }}>
+                                {isEditing ? (
+                                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                    <button
+                                      type="button"
+                                      style={buttonStyle}
+                                      disabled={saving}
+                                      onClick={() => saveEdit(row.id)}
+                                    >
+                                      {saving ? "Saving…" : "Save"}
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      style={ghostButton}
+                                      disabled={saving}
+                                      onClick={cancelEdit}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div style={menuWrap} onClick={(e) => e.stopPropagation()}>
+                                    <button
+                                      type="button"
+                                      style={iconButton}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setOpenMenuId((curr) => (curr === row.id ? null : row.id));
+                                      }}
+                                      aria-label="Open menu"
+                                    >
+                                      ⋯
+                                    </button>
+
+                                    {openMenuId === row.id && (
+                                      <div style={menuPanel}>
+                                        <button
+                                          type="button"
+                                          style={menuItem}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            startEdit(row);
+                                          }}
+                                        >
+                                          Edit
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          style={{ ...menuItem, color: "#fecaca" }}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            deleteEntry(row.id);
+                                          }}
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -1,9 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 type MyRole = "owner" | "admin" | "member" | null;
+
+type VisibilityState = {
+  showMaintenance: boolean;
+  showOperating: boolean;
+  showRental: boolean;
+};
 
 type SettingsRow = {
   aircraft_id: string;
@@ -44,11 +51,13 @@ export default function AllInCostPanel({
   myRole,
   maintenanceSpendAllTime,
   hoursFlownAllTime,
+  onVisibilityChange,
 }: {
   aircraftId: string;
   myRole: MyRole;
-  maintenanceSpendAllTime: number; // from your existing totals
-  hoursFlownAllTime: number; // from your existing tach-based model
+  maintenanceSpendAllTime: number;
+  hoursFlownAllTime: number;
+  onVisibilityChange?: (v: VisibilityState) => void;
 }) {
   const canEdit = myRole === "owner" || myRole === "admin";
 
@@ -58,27 +67,49 @@ export default function AllInCostPanel({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // ⚙️ collapsible settings drawer
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  function emitVisibility(nextSettings: SettingsRow) {
+    const showMaintenance = !!nextSettings.include_maintenance;
+
+    const showOperating =
+      !!nextSettings.include_insurance ||
+      !!nextSettings.include_fuel ||
+      !!nextSettings.include_hangar_tiedown ||
+      !!nextSettings.include_misc;
+
+    onVisibilityChange?.({
+      showMaintenance,
+      showOperating,
+      showRental: true,
+    });
+  }
+
   async function load() {
     setLoading(true);
     setErr(null);
 
     try {
-      // settings
       const { data: s, error: se } = await supabase
         .from("aircraft_settings")
-        .select("aircraft_id, show_cost_per_hour_summary, include_maintenance, include_insurance, include_fuel, include_hangar_tiedown, include_misc, updated_at")
+        .select(
+          "aircraft_id, show_cost_per_hour_summary, include_maintenance, include_insurance, include_fuel, include_hangar_tiedown, include_misc, updated_at"
+        )
         .eq("aircraft_id", aircraftId)
         .maybeSingle();
 
       if (se) throw se;
 
-      setSettings((cur) => ({
-        ...cur,
+      const merged: SettingsRow = {
+        ...DEFAULTS,
         ...(s ?? {}),
         aircraft_id: aircraftId,
-      }));
+      };
 
-      // operating expenses
+      setSettings(merged);
+      emitVisibility(merged);
+
       const { data: o, error: oe } = await supabase
         .from("aircraft_operating_expenses")
         .select("id, aircraft_id, entry_date, category, amount")
@@ -142,11 +173,11 @@ export default function AllInCostPanel({
     setSaving(true);
     setErr(null);
 
-    const next = { ...settings, ...patch, aircraft_id: aircraftId };
+    const next: SettingsRow = { ...settings, ...patch, aircraft_id: aircraftId };
 
-    const { error } = await supabase
-      .from("aircraft_settings")
-      .upsert(next, { onConflict: "aircraft_id" });
+    const { error } = await supabase.from("aircraft_settings").upsert(next, {
+      onConflict: "aircraft_id",
+    });
 
     if (error) {
       setErr(error.message);
@@ -155,10 +186,11 @@ export default function AllInCostPanel({
     }
 
     setSettings(next);
+    emitVisibility(next);
     setSaving(false);
   }
 
-  const card: React.CSSProperties = {
+  const card: CSSProperties = {
     padding: 14,
     borderRadius: 12,
     background: "#0f172a",
@@ -166,9 +198,9 @@ export default function AllInCostPanel({
     marginBottom: 14,
   };
 
-  const smallMuted: React.CSSProperties = { opacity: 0.75, fontSize: 12 };
+  const smallMuted: CSSProperties = { opacity: 0.75, fontSize: 12 };
 
-  const pill: React.CSSProperties = {
+  const pill: CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
     gap: 8,
@@ -181,9 +213,19 @@ export default function AllInCostPanel({
     fontSize: 12,
   };
 
-  const toggleRow: React.CSSProperties = { display: "flex", gap: 10, flexWrap: "wrap" };
+  const gearButton: CSSProperties = {
+    padding: "8px 10px",
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.15)",
+    background: "rgba(255,255,255,0.10)",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: 900,
+  };
 
-  const toggle: React.CSSProperties = {
+  const toggleRow: CSSProperties = { display: "flex", gap: 10, flexWrap: "wrap" };
+
+  const toggle: CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
     gap: 8,
@@ -195,14 +237,53 @@ export default function AllInCostPanel({
     userSelect: "none",
   };
 
-  const checkbox: React.CSSProperties = { width: 18, height: 18 };
+  const checkbox: CSSProperties = { width: 18, height: 18 };
 
   if (loading) {
     return <div style={{ color: "#e5e7eb", opacity: 0.85 }}>Loading all-in cost…</div>;
   }
 
+  // ✅ FIX: never lock user out
   if (!settings.show_cost_per_hour_summary) {
-    return null;
+    return (
+      <div style={card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ color: "#e5e7eb", fontWeight: 900, fontSize: 16 }}>All-in Cost / Hour</div>
+            <div style={{ color: "#9ca3af", fontSize: 13 }}>Hidden — click ⚙️ to re-enable.</div>
+          </div>
+
+          <button type="button" style={gearButton} onClick={() => setSettingsOpen(true)}>
+            ⚙️ Settings
+          </button>
+        </div>
+
+        {settingsOpen && (
+          <div style={{ marginTop: 14 }}>
+            {!canEdit ? (
+              <div style={{ color: "#9ca3af", fontWeight: 700 }}>Owner/Admin can change what’s included.</div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                  <input
+                    style={checkbox}
+                    type="checkbox"
+                    checked={settings.show_cost_per_hour_summary}
+                    disabled={saving}
+                    onChange={(e) => saveSettings({ show_cost_per_hour_summary: e.target.checked })}
+                  />
+                  <span style={{ color: "#e5e7eb", fontWeight: 900 }}>Show All-in widget</span>
+                </label>
+
+                <button type="button" style={{ ...gearButton, background: "transparent" }} onClick={() => setSettingsOpen(false)}>
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -215,105 +296,139 @@ export default function AllInCostPanel({
           </div>
         </div>
 
-        <span style={pill}>
-          {allIn == null ? "—" : money(allIn)} <span style={{ opacity: 0.8, fontWeight: 800 }}>/hr</span>
-        </span>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <span style={pill}>
+            {allIn == null ? "—" : money(allIn)} <span style={{ opacity: 0.8, fontWeight: 800 }}>/hr</span>
+          </span>
+
+          <button type="button" style={gearButton} onClick={() => setSettingsOpen((v) => !v)}>
+            ⚙️
+          </button>
+        </div>
       </div>
 
       {err && (
-        <div style={{ marginTop: 12, padding: 10, borderRadius: 12, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.35)", color: "#fecaca", fontWeight: 800 }}>
+        <div
+          style={{
+            marginTop: 12,
+            padding: 10,
+            borderRadius: 12,
+            background: "rgba(239,68,68,0.12)",
+            border: "1px solid rgba(239,68,68,0.35)",
+            color: "#fecaca",
+            fontWeight: 800,
+          }}
+        >
           {err}
         </div>
       )}
 
       <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ ...smallMuted, padding: "6px 10px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)" }}>
+        <div
+          style={{
+            ...smallMuted,
+            padding: "6px 10px",
+            borderRadius: 999,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "rgba(255,255,255,0.06)",
+          }}
+        >
           Selected costs: <b style={{ color: "#e5e7eb" }}>{money(includedCost)}</b>
         </div>
-        <div style={{ ...smallMuted, padding: "6px 10px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)" }}>
+        <div
+          style={{
+            ...smallMuted,
+            padding: "6px 10px",
+            borderRadius: 999,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "rgba(255,255,255,0.06)",
+          }}
+        >
           Hours: <b style={{ color: "#e5e7eb" }}>{Number(hoursFlownAllTime || 0).toFixed(1)}</b>
         </div>
       </div>
 
-      <div style={{ marginTop: 14 }}>
-        <div style={{ color: "#9ca3af", fontSize: 12, fontWeight: 900, marginBottom: 8 }}>Settings</div>
+      {settingsOpen && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ color: "#9ca3af", fontSize: 12, fontWeight: 900, marginBottom: 8 }}>Settings</div>
 
-        {!canEdit ? (
-          <div style={{ color: "#9ca3af", fontWeight: 700 }}>Owner/Admin can change what’s included.</div>
-        ) : (
-          <>
-            <div style={toggleRow}>
-              <label style={toggle}>
-                <input
-                  style={checkbox}
-                  type="checkbox"
-                  checked={settings.include_maintenance}
-                  disabled={saving}
-                  onChange={(e) => saveSettings({ include_maintenance: e.target.checked })}
-                />
-                Maintenance
-              </label>
+          {!canEdit ? (
+            <div style={{ color: "#9ca3af", fontWeight: 700 }}>Owner/Admin can change what’s included.</div>
+          ) : (
+            <>
+              <div style={toggleRow}>
+                <label style={toggle}>
+                  <input
+                    style={checkbox}
+                    type="checkbox"
+                    checked={settings.include_maintenance}
+                    disabled={saving}
+                    onChange={(e) => saveSettings({ include_maintenance: e.target.checked })}
+                  />
+                  Maintenance
+                </label>
 
-              <label style={toggle}>
-                <input
-                  style={checkbox}
-                  type="checkbox"
-                  checked={settings.include_fuel}
-                  disabled={saving}
-                  onChange={(e) => saveSettings({ include_fuel: e.target.checked })}
-                />
-                Fuel
-              </label>
+                <label style={toggle}>
+                  <input
+                    style={checkbox}
+                    type="checkbox"
+                    checked={settings.include_fuel}
+                    disabled={saving}
+                    onChange={(e) => saveSettings({ include_fuel: e.target.checked })}
+                  />
+                  Fuel
+                </label>
 
-              <label style={toggle}>
-                <input
-                  style={checkbox}
-                  type="checkbox"
-                  checked={settings.include_insurance}
-                  disabled={saving}
-                  onChange={(e) => saveSettings({ include_insurance: e.target.checked })}
-                />
-                Insurance
-              </label>
+                <label style={toggle}>
+                  <input
+                    style={checkbox}
+                    type="checkbox"
+                    checked={settings.include_insurance}
+                    disabled={saving}
+                    onChange={(e) => saveSettings({ include_insurance: e.target.checked })}
+                  />
+                  Insurance
+                </label>
 
-              <label style={toggle}>
-                <input
-                  style={checkbox}
-                  type="checkbox"
-                  checked={settings.include_hangar_tiedown}
-                  disabled={saving}
-                  onChange={(e) => saveSettings({ include_hangar_tiedown: e.target.checked })}
-                />
-                Hangar/Tiedown
-              </label>
+                <label style={toggle}>
+                  <input
+                    style={checkbox}
+                    type="checkbox"
+                    checked={settings.include_hangar_tiedown}
+                    disabled={saving}
+                    onChange={(e) => saveSettings({ include_hangar_tiedown: e.target.checked })}
+                  />
+                  Hangar/Tiedown
+                </label>
 
-              <label style={toggle}>
-                <input
-                  style={checkbox}
-                  type="checkbox"
-                  checked={settings.include_misc}
-                  disabled={saving}
-                  onChange={(e) => saveSettings({ include_misc: e.target.checked })}
-                />
-                Misc
-              </label>
-            </div>
+                <label style={toggle}>
+                  <input
+                    style={checkbox}
+                    type="checkbox"
+                    checked={settings.include_misc}
+                    disabled={saving}
+                    onChange={(e) => saveSettings({ include_misc: e.target.checked })}
+                  />
+                  Misc
+                </label>
+              </div>
 
-            <div style={{ marginTop: 10 }}>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                <input
-                  style={checkbox}
-                  type="checkbox"
-                  checked={settings.show_cost_per_hour_summary}
-                  disabled={saving}
-                  onChange={(e) => saveSettings({ show_cost_per_hour_summary: e.target.checked })}
-                />
-                <span style={{ color: "#e5e7eb", fontWeight: 900 }}>Show All-in widget</span>
-              </label>
-            </div>
-          </>
-        )}
-      </div>
+              <div style={{ marginTop: 10 }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                  <input
+                    style={checkbox}
+                    type="checkbox"
+                    checked={settings.show_cost_per_hour_summary}
+                    disabled={saving}
+                    onChange={(e) => saveSettings({ show_cost_per_hour_summary: e.target.checked })}
+                  />
+                  <span style={{ color: "#e5e7eb", fontWeight: 900 }}>Show All-in widget</span>
+                </label>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
